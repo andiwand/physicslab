@@ -37,6 +37,17 @@ The real τ = 2.6·10⁻⁷ a.u. is far too small to watch (hydrogen 2p lifetime
 | 10⁶ | 0.26 | τ ≪ orbital times; work done by F ≈ −(Larmor energy) |
 | 10⁸ | 26 | LL assumption violated; F still removes energy but only qualitatively |
 
+### Classical ensemble
+
+A second view runs N classical point electrons in the same potential (velocity Verlet, 4 substeps per quantum step), sampled from the current ψ on demand:
+
+- position ~ |ψ|²
+- momentum ~ Gaussian with the conditional mean and covariance of the Wigner function at that position: mean ∇S (phase gradient), covariance −¼∇∇ ln|ψ|² (clamped ≥ 0, since near nodes it can go negative / diverge).
+
+Exact for Gaussian states; in general it reproduces ⟨p⟩, ⟨p²⟩ and therefore ⟨H⟩, but not interference. Fractions (remaining, bound = E < 0) are scaled by the quantum norm at sampling time so they plot on the same axes as the quantum curves.
+
+With radiation on, each classical electron loses energy at its own Larmor rate τa², taken from its kinetic energy. That is not the Landau–Lifshitz force used for the quantum mean field (LL is unstable for point particles at large τ: near the core τ·|∇∇V| ≫ 1/Δt), only the same loss rate. A classical bound electron keeps radiating until it sits at the bottom of the well (E = −1/a = −2 Ha) — the classical collapse of the atom; the quantum ground state does not radiate.
+
 Limits of the mean-field picture: an excited eigenstate alone has ⟨a⟩ = 0 and never decays (real atoms do, via vacuum fluctuations); only superpositions radiate. And the wavefunction stays one coherent object instead of branching into "captured + photon" and "free electron".
 
 ## Checks (`node check.mjs`)
@@ -49,13 +60,18 @@ Limits of the mean-field picture: an excited eigenstate alone has ⟨a⟩ = 0 an
 - Sink, boost 10⁶, ground + 2p superposition: relaxes to P(1s) = 0.992; work −0.2216 Ha vs radiated 0.2221 Ha.
 - Sink, boost 10⁷, ground state alone: radiates nothing (⟨a⟩ = 0 by symmetry).
 - Sink, boost 10⁸, slow fly-by: P(bound) 0.03 → 0.59. Same result at Δt = 0.025 and 0.0125 (converged in time step).
+- Ensemble sampled from the Gaussian packet: ⟨p⟩ = (1.002, 0.000), var p = 0.040 (exact 1/4σ² = 0.04).
+- Ensemble sampled from the ground state: classical ⟨E⟩ = −0.6545 vs quantum −0.6555 Ha.
+- Classical energy conservation without sink: max |ΔE| = 4·10⁻⁴ Ha over t = 40 (20 000 electrons).
+- Classical ground-state ensemble with radiation (boost 10⁶): ⟨E⟩ drops to −1.6 Ha within t = 40, far below the quantum ground state.
 
 ## Findings
 
 1. **No sink → no capture.** With a time-independent Hamiltonian each eigenstate only acquires a phase, so bound-state populations are constants of motion. What is bound at t = 0 stays bound; the continuum part scatters and leaves.
 2. **The remnant after a fly-by is free, slow electron.** Positive energy, overlap with bound states ~10⁻⁶. It is the slow tail of the packet's momentum distribution and drains away roughly as a power law in t, not exponentially (×~10 per doubling of t).
 3. **Radiation reaction gives capture — but only when it is unphysically strong.** At boost 10⁶ (where the model is valid) a single pass captures nothing measurable; at 10⁸ a slow electron ends ~60 % bound, a head-on 13 eV electron ~40 %. Matches the real picture: radiative recombination is a rare process per encounter. Slow electrons are captured much more easily.
-4. **Captured population lands in excited levels first and cascades down**; a ground + 2p superposition relaxes to the ground state, with the emitted energy matching the 2p–1s gap.
+4. **Display note:** the brightness used to auto-scale to the current peak, which made a 10⁻⁴ remnant look as bright as the original packet. Default is now a fixed scale (initial peak); auto is a toggle.
+5. **Captured population lands in excited levels first and cascades down**; a ground + 2p superposition relaxes to the ground state, with the emitted energy matching the 2p–1s gap.
 
 ## Next
 

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const code = html.match(/<script id="physics">([\s\S]*?)<\/script>/)[1];
-const { Sim, Basis } = new Function(`${code}; return { Sim, Basis };`)();
+const { Sim, Basis, Ensemble } = new Function(`${code}; return { Sim, Basis, Ensemble };`)();
 
 let failures = 0;
 function expect(label, ok, detail) {
@@ -87,6 +87,37 @@ sim.step(2400);
 const p1 = basis.project(sim.re, sim.im).total;
 expect('slow fly-by, boost 1e8: capture', p1 > p0 + 0.3, `P(bound) ${p0.toFixed(3)} → ${p1.toFixed(3)}`);
 expect('  energy removed', sim.rrWork < -0.1, `work ${sim.rrWork.toFixed(4)} Ha (radiated ${sim.Erad.toFixed(4)}; τ = 26 a.u., LL balance not expected)`);
+
+// 5. Classical ensemble sampled from ψ.
+let seed = 12345;
+const rng = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+sim.boost = 0;
+const ens = new Ensemble(sim);
+sim.setPacket({ x0: -18, y0: 4, kx: 1, ky: 0, sigma: 2.5 });
+ens.sample(20000, rng);
+const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+const vr = (a) => { const m = mean(a); return mean(a.map((v) => (v - m) ** 2)); };
+const [mvx, mvy, vvx, vvy, vx_] = [mean(ens.vx), mean(ens.vy), vr(ens.vx), vr(ens.vy), vr(ens.x)];
+expect('sampling a Gaussian packet: momentum mean and variance',
+  Math.abs(mvx - 1) < 0.01 && Math.abs(mvy) < 0.01 && Math.abs(vvx - 0.04) < 0.003 && Math.abs(vvy - 0.04) < 0.003,
+  `⟨p⟩ = (${mvx.toFixed(3)}, ${mvy.toFixed(3)}), var = (${vvx.toFixed(4)}, ${vvy.toFixed(4)}) vs 0.04; var x = ${vx_.toFixed(2)} vs 6.25`);
+
+sim.setSuperposition([{ level: lv(1, 0), m: 0, c: [1, 0] }]);
+ens.sample(20000, rng);
+const Ecl = mean(Array.from({ length: ens.n }, (_, k) => ens.energy(k)));
+expect('sampling the ground state: classical ⟨E⟩ ≈ quantum ⟨H⟩', Math.abs(Ecl - lv(1, 0).E) < 0.02,
+  `${Ecl.toFixed(4)} vs ${lv(1, 0).E.toFixed(4)} Ha`);
+
+const E0s = Array.from({ length: ens.n }, (_, k) => ens.energy(k));
+ens.step(800);
+let maxDE = 0;
+for (let k = 0; k < ens.n; k++) if (ens.alive[k]) maxDE = Math.max(maxDE, Math.abs(ens.energy(k) - E0s[k]));
+expect('classical energy conservation (no sink, t = 40)', maxDE < 1e-3, `max |ΔE| = ${fmt(maxDE)} Ha`);
+
+ens.step(800, 1e6 * 2 / (3 * 137.035999 ** 3));
+const st = ens.stats();
+expect('classical ground-state ensemble with radiation (boost 1e6) collapses below the quantum ground state',
+  st.Emean < lv(1, 0).E - 0.2, `⟨E⟩ = ${st.Emean.toFixed(3)} Ha (quantum ground ${lv(1, 0).E.toFixed(3)}, well bottom −2)`);
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

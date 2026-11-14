@@ -21,12 +21,20 @@
   main { max-width: 1080px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   p.sub { margin: 0 0 14px; color: var(--muted); }
-  .layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 820px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .views.single { grid-template-columns: minmax(0, 620px); }
+  .views figure { margin: 0; }
+  .views figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  @media (max-width: 700px) { .views { grid-template-columns: minmax(0, 1fr); } }
+  .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+  .panels > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panels .panel { margin-bottom: 0; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  input[type=number] { font: inherit; width: 80px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
   .view { position: relative; width: 100%; aspect-ratio: 1; background: #000; border-radius: 6px; overflow: hidden; touch-action: none; }
   .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   #psi { image-rendering: auto; }
-  #overlay { cursor: crosshair; }
+  #overlay, #classical { cursor: crosshair; }
   .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
   .panel h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
@@ -57,15 +65,19 @@
   <h1>Electron near a proton (2D)</h1>
   <p class="sub">Time-dependent Schrödinger equation, fixed soft-core proton, split-operator FFT. Optional energy sink: semiclassical radiation reaction.</p>
 
-  <div class="layout">
-    <div>
-      <div class="view" id="view">
-        <canvas id="psi"></canvas>
-        <canvas id="overlay"></canvas>
-      </div>
-      <div class="hint">Drag on the field to place the electron and set its momentum (drag direction and length); a click without dragging starts it at rest. Brightness = |ψ| (or log |ψ|²), colour = phase. The dashed circle bounds the region where bound states are tracked; outside the shaded line outgoing waves are absorbed.</div>
-    </div>
+  <div class="views" id="views">
+    <figure>
+      <div class="view"><canvas id="psi"></canvas><canvas id="overlay"></canvas></div>
+      <figcaption>Quantum: brightness = |ψ| (or log |ψ|²), colour = phase<span id="ovCap"></span></figcaption>
+    </figure>
+    <figure id="classicalFig">
+      <div class="view"><canvas id="classical"></canvas></div>
+      <figcaption>Classical ensemble sampled from ψ: <span class="dot" style="background:#6ea2ff"></span>bound (E &lt; 0) <span class="dot" style="background:#ffb15c"></span>free</figcaption>
+    </figure>
+  </div>
+  <div class="hint" style="margin:-6px 0 12px">Drag on either field to place the electron and set its momentum (drag direction and length); a click without dragging starts it at rest. Dashed circle: region where bound states are tracked. Shaded: absorbing edge.</div>
 
+  <div class="panels">
     <div>
       <div class="panel">
         <div class="row">
@@ -82,12 +94,36 @@
           <label><input id="phase" type="checkbox" checked> phase colour</label>
         </div>
         <div class="row">
+          <label>brightness <select id="scale"><option value="fixed">fixed (initial peak)</option><option value="auto">auto (current peak)</option></select></label>
+        </div>
+        <div class="row">
           <label><input id="rrOn" type="checkbox"> radiation reaction</label>
           <label>boost <input id="boost" type="range" min="4" max="8" step="0.5"><span id="boostVal"></span></label>
         </div>
         <div class="hint" id="rrWarn"></div>
       </div>
 
+      <div class="panel">
+        <h2>Classical ensemble</h2>
+        <div class="row">
+          <label>N <input id="nSamples" type="number" min="1" max="20000" step="100" value="500"></label>
+          <button id="resample">Sample from ψ</button>
+        </div>
+        <div class="row">
+          <label><input id="overlayDots" type="checkbox"> overlay on ψ</label>
+          <label><input id="trails" type="checkbox"> trails</label>
+        </div>
+        <dl class="readout">
+          <dt>sampled at</dt><dd id="cT"></dd>
+          <dt>remaining</dt><dd id="cAlive"></dd>
+          <dt>bound (E &lt; 0)</dt><dd id="cBound"></dd>
+          <dt>⟨E⟩ of remaining</dt><dd id="cE"></dd>
+          <dt>radiated / electron</dt><dd id="cRad"></dd>
+        </dl>
+      </div>
+    </div>
+
+    <div>
       <div class="panel">
         <h2>State</h2>
         <dl class="readout">
@@ -107,6 +143,7 @@
         <div class="legend">
           <span><span class="swatch" style="background:var(--c-norm)"></span>norm</span>
           <span><span class="swatch" style="background:var(--c-bound)"></span>P(bound)</span>
+          <span>dashed: classical</span>
         </div>
       </div>
 
@@ -128,6 +165,8 @@
       <li><b>Radiation reaction</b> (energy sink): an accelerating charge radiates (Larmor power P = 2a²/3c³) and feels a recoil force F = (2/3c³)·da/dt (Abraham–Lorentz, Landau–Lifshitz form). Here it is applied semiclassically: a is the mean Coulomb acceleration ⟨−∇V⟩, and F acts as a uniform force on the whole wavefunction. The real effect is ~10⁶–10⁸× too slow to watch (2p lifetime in hydrogen ≈ 1.6 ns ≈ 7·10⁷ a.u.), so τ = 2/3c³ = 2.6·10⁻⁷ a.u. is multiplied by the boost.</li>
       <li>The Landau–Lifshitz form assumes τ ≪ the time scale of the motion. Then "work by reaction force" ≈ −"radiated". For boost ≳ 10⁶ (τ ≳ 0.3 a.u.) this no longer holds: the force still removes energy, but the numbers are qualitative. Single-pass capture of a free electron only shows up in that regime — consistent with radiative recombination being a rare process in reality.</li>
       <li>Limits of the mean-field picture: a single excited eigenstate has ⟨a⟩ = 0 and never decays (real atoms do, via vacuum fluctuations); only superpositions radiate. The wavefunction stays one coherent object instead of splitting into "captured + photon" and "free" branches.</li>
+      <li><b>Classical ensemble:</b> N point electrons in the same potential (velocity Verlet). Initial positions are drawn from |ψ|²; momenta from a Gaussian with the local mean and spread of the Wigner function at that point (mean ∇S, covariance −¼∇∇ ln|ψ|²). This is exact for Gaussian packets and reproduces ⟨p⟩, ⟨p²⟩ and ⟨H⟩ in general, but not interference. Resampling at any time starts a fresh ensemble from the current ψ. Remaining / bound fractions are scaled by the quantum norm at the sampling time, so they compare directly with the quantum curves.</li>
+      <li>Classical radiation: each electron loses energy at its own Larmor rate τa² (same τ and boost), taken from its kinetic energy. Not the same force law as the quantum mean field (the Landau–Lifshitz form is unstable for point particles at large τ), but the same energy loss rate. Each classical electron radiates on its own, whereas the quantum mean field only radiates through the average dipole — and a classical bound electron keeps radiating until it sits at the bottom of the well (E = −1/a = −2 Ha), the classical "collapse of the atom". The quantum ground state does not radiate.</li>
       <li><b>What to look for:</b> slow electrons are captured much more readily than fast ones; captured population first lands in excited levels and then cascades down; a ground + 2p superposition relaxes to the ground state.</li>
     </ul>
   </details>
@@ -489,6 +528,117 @@ class Basis {
     return { pops, total };
   }
 }
+// Classical point electrons in the same potential.
+// Sampling from ψ: position ~ |ψ|², momentum ~ Gaussian with the conditional mean and covariance of the
+// Wigner function at that position: mean ∇S (phase gradient), covariance −¼ ∇∇ ln|ψ|² (clamped ≥ 0).
+// Exact for Gaussian states; in general the ensemble reproduces ⟨p⟩, ⟨p²⟩ and hence ⟨H⟩.
+class Ensemble {
+  constructor(sim) {
+    this.sim = sim;
+    this.n = 0;
+    this.lim = sim.L / 2 - sim.absorb + 8; // particles beyond this are counted as gone (edge of the view)
+  }
+
+  sample(n, rng = Math.random) {
+    const s = this.sim, N = s.N, n2 = N * N, dx = s.dx, { re, im, ks, xs } = s;
+    // ∇ψ spectrally
+    const dxr = new Float64Array(n2), dxi = new Float64Array(n2), dyr = new Float64Array(n2), dyi = new Float64Array(n2);
+    s.sr.set(re); s.si.set(im); s.fft2(s.sr, s.si, false);
+    for (let j = 0; j < N; j++) {
+      for (let i = 0, idx = j * N; i < N; i++, idx++) {
+        const a = s.sr[idx] / n2, b = s.si[idx] / n2;
+        dxr[idx] = -ks[i] * b; dxi[idx] = ks[i] * a;
+        dyr[idx] = -ks[j] * b; dyi[idx] = ks[j] * a;
+      }
+    }
+    s.fft2(dxr, dxi, true); s.fft2(dyr, dyi, true);
+
+    const rho = new Float64Array(n2), cdf = new Float64Array(n2);
+    let tot = 0, max = 0;
+    for (let i = 0; i < n2; i++) { rho[i] = re[i] * re[i] + im[i] * im[i]; tot += rho[i]; cdf[i] = tot; if (rho[i] > max) max = rho[i]; }
+    const lnr = new Float64Array(n2), floor = max * 1e-14;
+    for (let i = 0; i < n2; i++) lnr[i] = Math.log(rho[i] + floor);
+    const VAR_MAX = 9; // clamp momentum variance (near nodes −∇²ln ρ diverges)
+
+    const gauss = () => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng());
+    this.n = n;
+    this.x = new Float64Array(n); this.y = new Float64Array(n);
+    this.vx = new Float64Array(n); this.vy = new Float64Array(n);
+    this.alive = new Uint8Array(n).fill(1);
+    this.Erad = new Float64Array(n);
+    this.norm0 = tot * dx * dx;
+    this.t0 = s.t;
+    for (let k = 0; k < n; k++) {
+      const u = rng() * tot;
+      let lo = 0, hi = n2 - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < u) lo = mid + 1; else hi = mid; }
+      const idx = lo, i = idx % N, j = (idx / N) | 0;
+      this.x[k] = xs[i] + (rng() - 0.5) * dx;
+      this.y[k] = xs[j] + (rng() - 0.5) * dx;
+      const r = rho[idx] || 1e-300;
+      const mx = (re[idx] * dxi[idx] - im[idx] * dxr[idx]) / r;
+      const my = (re[idx] * dyi[idx] - im[idx] * dyr[idx]) / r;
+      const ip = Math.min(i + 1, N - 1), imn = Math.max(i - 1, 0), jp = Math.min(j + 1, N - 1), jm = Math.max(j - 1, 0);
+      const L0 = lnr[idx];
+      const hxx = (lnr[j * N + ip] - 2 * L0 + lnr[j * N + imn]) / (dx * dx);
+      const hyy = (lnr[jp * N + i] - 2 * L0 + lnr[jm * N + i]) / (dx * dx);
+      const hxy = (lnr[jp * N + ip] - lnr[jm * N + ip] - lnr[jp * N + imn] + lnr[jm * N + imn]) / (4 * dx * dx);
+      const cxx = -0.25 * hxx, cyy = -0.25 * hyy, cxy = -0.25 * hxy;
+      const th = 0.5 * Math.atan2(2 * cxy, cxx - cyy), c = Math.cos(th), sn = Math.sin(th);
+      const l1raw = cxx * c * c + 2 * cxy * c * sn + cyy * sn * sn, l2raw = cxx + cyy - l1raw;
+      const l1 = Math.min(Math.max(l1raw, 0), VAR_MAX), l2 = Math.min(Math.max(l2raw, 0), VAR_MAX);
+      const z1 = gauss() * Math.sqrt(l1), z2 = gauss() * Math.sqrt(l2);
+      this.vx[k] = mx + z1 * c - z2 * sn;
+      this.vy[k] = my + z1 * sn + z2 * c;
+    }
+  }
+
+  // Velocity Verlet, SUB substeps per quantum step. Optional radiation loss at the Larmor rate τa²,
+  // taken out of the kinetic energy (drag along −v); see notes in the page.
+  step(nSteps, tau = 0) {
+    const SUB = 4, s = this.sim, h = s.dt / SUB, a2 = s.soft * s.soft, lim = this.lim;
+    const { x, y, vx, vy, alive, Erad } = this;
+    for (let k = 0; k < this.n; k++) {
+      if (!alive[k]) continue;
+      let X = x[k], Y = y[k], VX = vx[k], VY = vy[k];
+      let f = -1 / Math.pow(X * X + Y * Y + a2, 1.5), AX = f * X, AY = f * Y;
+      for (let sub = 0; sub < SUB * nSteps; sub++) {
+        VX += 0.5 * h * AX; VY += 0.5 * h * AY;
+        X += h * VX; Y += h * VY;
+        f = -1 / Math.pow(X * X + Y * Y + a2, 1.5); AX = f * X; AY = f * Y;
+        VX += 0.5 * h * AX; VY += 0.5 * h * AY;
+        if (tau > 0) {
+          const ke = 0.5 * (VX * VX + VY * VY), dE = tau * (AX * AX + AY * AY) * h;
+          const g = ke > dE ? Math.sqrt(1 - dE / ke) : 0;
+          Erad[k] += ke > dE ? dE : ke;
+          VX *= g; VY *= g;
+        }
+        if (Math.abs(X) > lim || Math.abs(Y) > lim) { alive[k] = 0; break; }
+      }
+      x[k] = X; y[k] = Y; vx[k] = VX; vy[k] = VY;
+    }
+  }
+
+  energy(k) {
+    const r2 = this.x[k] ** 2 + this.y[k] ** 2;
+    return 0.5 * (this.vx[k] ** 2 + this.vy[k] ** 2) - 1 / Math.sqrt(r2 + this.sim.soft ** 2);
+  }
+
+  // Fractions are scaled by the quantum norm at sampling time, so they compare directly with norm / P(bound).
+  stats() {
+    let alive = 0, bound = 0, E = 0, rad = 0;
+    for (let k = 0; k < this.n; k++) {
+      rad += this.Erad[k];
+      if (!this.alive[k]) continue;
+      alive++;
+      const e = this.energy(k);
+      E += e;
+      if (e < 0) bound++;
+    }
+    const w = this.n ? this.norm0 / this.n : 0;
+    return { alive: alive * w, bound: bound * w, Emean: alive ? E / alive : 0, rad: this.n ? rad / this.n : 0 };
+  }
+}
 // ---------- end physics ----------
 </script>
 
@@ -507,6 +657,10 @@ psiCanvas.width = psiCanvas.height = VIEWPX;
 const pctx = psiCanvas.getContext('2d');
 const img = pctx.createImageData(N, N);
 const octx = overlay.getContext('2d');
+const ccan = $('classical'), cctx = ccan.getContext('2d');
+const ens = new Ensemble(sim);
+const C_BOUND = '#6ea2ff', C_FREE = '#ffb15c';
+let refMax = 1, autoScale = false, overlayDots = false, trails = false, ensGen = 0, cLast = null;
 
 const levelOf = (n, m) => basis.levels.find((l) => l.n === n && l.m === m);
 const PRESETS = [
@@ -553,16 +707,31 @@ function syncLabels() {
 function reset() {
   if (current.terms) sim.setSuperposition(current.terms());
   else sim.setPacket(current.packet);
+  refMax = 0;
+  for (let i = 0; i < sim.re.length; i++) refMax = Math.max(refMax, sim.re[i] ** 2 + sim.im[i] ** 2);
   hist = [];
   const m = sim.measure();
   E0 = m.E / m.norm;
+  resample(false);
   sample(m);
 }
+
+function resample(record = true) {
+  const n = Math.max(1, Math.min(20000, Math.round(+$('nSamples').value) || 500));
+  $('nSamples').value = n;
+  ens.sample(n);
+  ensGen++;
+  clearClassical();
+  if (record) sample();
+}
+
+const tauNow = () => sim.boost * 2 / (3 * C_AU ** 3);
 
 function sample(m = sim.measure()) {
   const pr = basis.project(sim.re, sim.im);
   last = { t: sim.t, norm: m.norm, E: m.E, bound: pr.total, pops: pr.pops };
-  hist.push({ t: sim.t, norm: m.norm, bound: pr.total });
+  cLast = ens.n ? ens.stats() : null;
+  hist.push({ t: sim.t, norm: m.norm, bound: pr.total, cNorm: cLast?.alive, cBound: cLast?.bound, gen: ensGen });
   updateReadouts();
   drawChart();
 }
@@ -583,6 +752,13 @@ function updateReadouts() {
       `<td class="num">${p.toFixed(4)}</td></tr>`;
   });
   $('pops').innerHTML = rows.join('');
+  if (cLast) {
+    $('cT').textContent = `t = ${ens.t0.toFixed(1)} a.u., N = ${ens.n}`;
+    $('cAlive').textContent = cLast.alive.toFixed(4);
+    $('cBound').textContent = cLast.bound.toFixed(4);
+    $('cE').textContent = fmtE(cLast.Emean);
+    $('cRad').textContent = sim.boost ? fmtE(cLast.rad) : 'off';
+  }
 }
 
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
@@ -605,17 +781,23 @@ function drawChart() {
     ctx.fillText(v.toFixed(1), 4, Y(v) + 3);
   }
   ctx.fillText(`t = ${tMax.toFixed(0)} a.u.`, w - pad.r - 64, h - 4);
-  for (const [key, col] of [['norm', '--c-norm'], ['bound', '--c-bound']]) {
-    ctx.strokeStyle = cssVar(col); ctx.lineWidth = 1.5; ctx.beginPath();
-    hist.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p[key])) : ctx.moveTo(X(p.t), Y(p[key]))));
+  for (const [key, col, dash] of [['norm', '--c-norm', []], ['bound', '--c-bound', []], ['cNorm', '--c-norm', [4, 3]], ['cBound', '--c-bound', [4, 3]]]) {
+    ctx.strokeStyle = cssVar(col); ctx.lineWidth = 1.5; ctx.setLineDash(dash); ctx.beginPath();
+    let prev = null;
+    for (const p of hist) {
+      if (p[key] === undefined) { prev = null; continue; }
+      if (prev && prev.gen === p.gen) ctx.lineTo(X(p.t), Y(p[key])); else ctx.moveTo(X(p.t), Y(p[key]));
+      prev = p;
+    }
     ctx.stroke();
   }
+  ctx.setLineDash([]);
 }
 
 function render() {
   const { re, im } = sim, d = img.data;
-  let max = 0;
-  for (let i = 0; i < re.length; i++) { const p = re[i] * re[i] + im[i] * im[i]; if (p > max) max = p; }
+  let max = refMax;
+  if (autoScale) { max = 0; for (let i = 0; i < re.length; i++) { const p = re[i] * re[i] + im[i] * im[i]; if (p > max) max = p; } }
   const inv = max > 0 ? 1 / max : 0, decades = 5;
   for (let j = 0; j < N; j++) {
     const row = (N - 1 - j) * N; // y up
@@ -623,6 +805,7 @@ function render() {
       const idx = j * N + i, a = re[idx], b = im[idx];
       const p = (a * a + b * b) * inv;
       let v = mode === 'amp' ? Math.sqrt(p) : Math.max(0, Math.log10(p + 1e-300) / decades + 1);
+      if (v > 1) v = 1;
       let R = v, G = v, B = v;
       if (phaseColor) {
         const amp = Math.sqrt(a * a + b * b) || 1, c = a / amp, s = b / amp;
@@ -636,6 +819,58 @@ function render() {
   }
   pctx.putImageData(img, -CROP, -CROP, CROP, CROP, VIEWPX, VIEWPX);
   drawOverlay();
+  drawClassical();
+}
+
+function drawStatic(ctx, S) {
+  const [ix, iy] = toPx(-(L / 2 - sim.absorb), L / 2 - sim.absorb, S), iw = (L - 2 * sim.absorb) / VS * S;
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  ctx.fillRect(0, 0, S, iy); ctx.fillRect(0, iy + iw, S, S - iy - iw);
+  ctx.fillRect(0, iy, ix, iw); ctx.fillRect(ix + iw, iy, S - ix - iw, iw);
+  const [cx, cy] = toPx(0, 0, S);
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, sim.rSafe / VS * S, 0, 2 * Math.PI); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ff5a4f';
+  ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, 2 * Math.PI); ctx.fill();
+}
+
+function drawDots(ctx, S, size) {
+  if (!ens.n) return;
+  const bound = [], free = [];
+  for (let k = 0; k < ens.n; k++) if (ens.alive[k]) (ens.energy(k) < 0 ? bound : free).push(k);
+  for (const [list, col] of [[free, C_FREE], [bound, C_BOUND]]) {
+    ctx.fillStyle = col;
+    for (const k of list) {
+      const [px, py] = toPx(ens.x[k], ens.y[k], S);
+      ctx.fillRect(px - size / 2, py - size / 2, size, size);
+    }
+  }
+}
+
+function sizeCanvas(c) {
+  const dpr = window.devicePixelRatio || 1, S = c.clientWidth;
+  if (S && c.width !== Math.round(S * dpr)) { c.width = c.height = Math.round(S * dpr); return true; }
+  return false;
+}
+
+function clearClassical() {
+  sizeCanvas(ccan);
+  cctx.setTransform(1, 0, 0, 1, 0, 0);
+  cctx.fillStyle = '#000'; cctx.fillRect(0, 0, ccan.width, ccan.height);
+}
+
+function drawClassical() {
+  if (overlayDots) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (sizeCanvas(ccan)) clearClassical();
+  const S = ccan.clientWidth;
+  cctx.setTransform(1, 0, 0, 1, 0, 0);
+  cctx.fillStyle = trails ? 'rgba(0,0,0,0.08)' : '#000';
+  cctx.fillRect(0, 0, ccan.width, ccan.height);
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawStatic(cctx, S);
+  drawDots(cctx, S, ens.n > 3000 ? 1.5 : 2.5);
 }
 
 function toPx(x, y, S) { return [(x - V0) / VS * S, (V0 + VS - y) / VS * S]; }
@@ -647,16 +882,8 @@ function drawOverlay() {
   const ctx = octx;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, S, S);
-  const [ix, iy] = toPx(-(L / 2 - sim.absorb), L / 2 - sim.absorb, S), iw = (L - 2 * sim.absorb) / VS * S;
-  ctx.fillStyle = 'rgba(255,255,255,0.07)';
-  ctx.fillRect(0, 0, S, iy); ctx.fillRect(0, iy + iw, S, S - iy - iw);
-  ctx.fillRect(0, iy, ix, iw); ctx.fillRect(ix + iw, iy, S - ix - iw, iw);
-  const [cx, cy] = toPx(0, 0, S);
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.arc(cx, cy, sim.rSafe / VS * S, 0, 2 * Math.PI); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = '#ff5a4f';
-  ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, 2 * Math.PI); ctx.fill();
+  drawStatic(ctx, S);
+  if (overlayDots) drawDots(ctx, S, 2);
 
   let arrow = null;
   if (drag) arrow = drag;
@@ -692,22 +919,25 @@ function dragK() {
   return { kx, ky };
 }
 function eventAu(e) {
-  const rect = overlay.getBoundingClientRect();
+  const rect = e.currentTarget.getBoundingClientRect();
   return toAu(e.clientX - rect.left, e.clientY - rect.top, rect.width);
 }
-overlay.addEventListener('pointerdown', (e) => {
-  overlay.setPointerCapture(e.pointerId);
-  const [x, y] = eventAu(e);
-  drag = { x0: x, y0: y, x1: x, y1: y };
-  setPlaying(false);
-  drawOverlay();
-});
-overlay.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  [drag.x1, drag.y1] = eventAu(e);
-  drawOverlay();
-});
-overlay.addEventListener('pointerup', () => {
+for (const el of [overlay, ccan]) {
+  el.addEventListener('pointerdown', (e) => {
+    el.setPointerCapture(e.pointerId);
+    const [x, y] = eventAu(e);
+    drag = { x0: x, y0: y, x1: x, y1: y };
+    setPlaying(false);
+    drawOverlay();
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    [drag.x1, drag.y1] = eventAu(e);
+    drawOverlay();
+  });
+  el.addEventListener('pointerup', endDrag);
+}
+function endDrag() {
   if (!drag) return;
   const k = dragK();
   current = { name: 'custom', packet: { x0: drag.x0, y0: drag.y0, ...k, sigma: +$('sigma').value } };
@@ -715,7 +945,7 @@ overlay.addEventListener('pointerup', () => {
   drag = null;
   reset(); render();
   setPlaying(true);
-});
+}
 
 function setPlaying(p) { playing = p; $('play').textContent = p ? 'Pause' : 'Play'; }
 $('play').onclick = () => setPlaying(!playing);
@@ -736,11 +966,23 @@ $('speed').oninput = () => { stepsPerFrame = +$('speed').value; syncLabels(); };
 $('rrOn').onchange = $('boost').oninput = () => { syncLabels(); updateReadouts(); };
 $('mode').onchange = () => { mode = $('mode').value; render(); };
 $('phase').onchange = () => { phaseColor = $('phase').checked; render(); };
-window.addEventListener('resize', () => { drawChart(); drawOverlay(); });
+$('scale').onchange = () => { autoScale = $('scale').value === 'auto'; render(); };
+$('resample').onclick = () => { resample(); render(); };
+$('nSamples').onchange = () => { resample(); render(); };
+$('trails').onchange = () => { trails = $('trails').checked; clearClassical(); render(); };
+$('overlayDots').onchange = () => {
+  overlayDots = $('overlayDots').checked;
+  $('classicalFig').style.display = overlayDots ? 'none' : '';
+  $('views').classList.toggle('single', overlayDots);
+  $('ovCap').textContent = overlayDots ? '; dots: classical ensemble (blue bound, orange free)' : '';
+  requestAnimationFrame(() => { clearClassical(); render(); drawChart(); });
+};
+window.addEventListener('resize', () => { drawChart(); render(); });
 
 function loop() {
   if (playing) {
     sim.step(stepsPerFrame);
+    ens.step(stepsPerFrame, tauNow());
     if (++frameNo % 3 === 0) sample();
     else $('rT').textContent = `${sim.t.toFixed(1)} a.u. (${(sim.t * AU_TIME_FS).toFixed(3)} fs)`;
     render();
