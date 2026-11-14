@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electron near a proton (2D)</title>
+<style>
+  :root {
+    --bg: #fafaf8; --fg: #1d1d1b; --muted: #6b6a65; --panel: #f0efeb; --line: #d8d6cf;
+    --c-bound: #2f6fdb; --c-norm: #c96a12; --c-energy: #7a4fc2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --fg: #e8e6e1; --muted: #9a978f; --panel: #1f1e1c; --line: #36342f;
+      --c-bound: #6ea2ff; --c-norm: #f0a050; --c-energy: #b192ef;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 14px; color: var(--muted); }
+  .layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 820px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .view { position: relative; width: 100%; aspect-ratio: 1; background: #000; border-radius: 6px; overflow: hidden; touch-action: none; }
+  .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #psi { image-rendering: auto; }
+  #overlay { cursor: crosshair; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+  .panel h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
+  label { display: flex; gap: 6px; align-items: center; }
+  button, select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  button.primary { min-width: 72px; }
+  input[type=range] { width: 120px; }
+  .readout { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+  .readout dt { color: var(--muted); }
+  .readout dd { margin: 0; }
+  .swatch { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
+  canvas.chart { width: 100%; height: 140px; display: block; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 12px; margin-top: 4px; }
+  table.pops { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+  table.pops td { padding: 1px 4px; white-space: nowrap; }
+  table.pops td.bar { width: 100%; }
+  table.pops .b { height: 8px; background: var(--c-bound); border-radius: 2px; min-width: 1px; }
+  table.pops .num { text-align: right; color: var(--muted); }
+  details { margin-top: 16px; }
+  details p, details li { color: var(--fg); max-width: 75ch; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Electron near a proton (2D)</h1>
+  <p class="sub">Time-dependent Schrödinger equation, fixed soft-core proton, split-operator FFT. Optional energy sink: semiclassical radiation reaction.</p>
+
+  <div class="layout">
+    <div>
+      <div class="view" id="view">
+        <canvas id="psi"></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="hint">Drag on the field to place the electron and set its momentum (drag direction and length); a click without dragging starts it at rest. Brightness = |ψ| (or log |ψ|²), colour = phase. The dashed circle bounds the region where bound states are tracked; outside the shaded line outgoing waves are absorbed.</div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <div class="row">
+          <button id="play" class="primary">Play</button>
+          <button id="reset">Reset</button>
+          <select id="preset"></select>
+        </div>
+        <div class="row">
+          <label>σ <input id="sigma" type="range" min="0.8" max="5" step="0.1"><span id="sigmaVal"></span></label>
+          <label>speed <input id="speed" type="range" min="1" max="20" step="1"><span id="speedVal"></span></label>
+        </div>
+        <div class="row">
+          <label>view <select id="mode"><option value="amp">|ψ|</option><option value="log">log |ψ|² (5 decades)</option></select></label>
+          <label><input id="phase" type="checkbox" checked> phase colour</label>
+        </div>
+        <div class="row">
+          <label><input id="rrOn" type="checkbox"> radiation reaction</label>
+          <label>boost <input id="boost" type="range" min="4" max="8" step="0.5"><span id="boostVal"></span></label>
+        </div>
+        <div class="hint" id="rrWarn"></div>
+      </div>
+
+      <div class="panel">
+        <h2>State</h2>
+        <dl class="readout">
+          <dt>t</dt><dd id="rT"></dd>
+          <dt>norm on grid</dt><dd id="rNorm"></dd>
+          <dt>P(bound)</dt><dd id="rBound"></dd>
+          <dt>⟨H⟩ on grid</dt><dd id="rE"></dd>
+          <dt>initial ⟨H⟩</dt><dd id="rE0"></dd>
+          <dt>radiated (Larmor)</dt><dd id="rRad"></dd>
+          <dt>work by reaction force</dt><dd id="rWork"></dd>
+        </dl>
+      </div>
+
+      <div class="panel">
+        <h2>History</h2>
+        <canvas id="chart" class="chart"></canvas>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--c-norm)"></span>norm</span>
+          <span><span class="swatch" style="background:var(--c-bound)"></span>P(bound)</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Bound-state populations</h2>
+        <table class="pops" id="pops"></table>
+      </div>
+    </div>
+  </div>
+
+  <details>
+    <summary>Model and what to look for</summary>
+    <ul>
+      <li>Atomic units (ħ = mₑ = e = 1; length a₀, energy 1 Ha = 27.2 eV, time 24.2 as). Proton fixed at the origin (it is 1836× heavier).</li>
+      <li>Potential V(r) = −1/√(r² + a²) with softening a = <span id="softVal"></span> to avoid the 1/r singularity on the grid. 2D, so the level structure differs from real hydrogen.</li>
+      <li>Grid <span id="gridVal"></span>. Split-operator step e^{−iVΔt/2} e^{−iTΔt} e^{−iVΔt/2}, kinetic part in Fourier space. Complex absorbing potential ∝ s⁴ over the outer <span class="absVal"></span> a₀. Reflection measured against the exact free packet: ~10⁻⁶ at k = 1, ~10⁻³ at k = 0.6, but several % for very slow waves (k ≲ 0.3, wavelength longer than the absorber).</li>
+      <li>Bound states are computed from the radial equation (one 1D eigenproblem per |m|) and kept only if ≥ 99 % of them lies inside the dashed circle. Very high Rydberg states do not fit on the grid and are not counted.</li>
+      <li><b>Without radiation reaction:</b> the Hamiltonian is time-independent, so every eigenstate only picks up a phase. P(bound) stays constant (up to discretisation error) — the electron is never captured. Whatever was bound at t = 0 stays; the rest scatters and leaves through the absorber.</li>
+      <li><b>Radiation reaction</b> (energy sink): an accelerating charge radiates (Larmor power P = 2a²/3c³) and feels a recoil force F = (2/3c³)·da/dt (Abraham–Lorentz, Landau–Lifshitz form). Here it is applied semiclassically: a is the mean Coulomb acceleration ⟨−∇V⟩, and F acts as a uniform force on the whole wavefunction. The real effect is ~10⁶–10⁸× too slow to watch (2p lifetime in hydrogen ≈ 1.6 ns ≈ 7·10⁷ a.u.), so τ = 2/3c³ = 2.6·10⁻⁷ a.u. is multiplied by the boost.</li>
+      <li>The Landau–Lifshitz form assumes τ ≪ the time scale of the motion. Then "work by reaction force" ≈ −"radiated". For boost ≳ 10⁶ (τ ≳ 0.3 a.u.) this no longer holds: the force still removes energy, but the numbers are qualitative. Single-pass capture of a free electron only shows up in that regime — consistent with radiative recombination being a rare process in reality.</li>
+      <li>Limits of the mean-field picture: a single excited eigenstate has ⟨a⟩ = 0 and never decays (real atoms do, via vacuum fluctuations); only superpositions radiate. The wavefunction stays one coherent object instead of splitting into "captured + photon" and "free" branches.</li>
+      <li><b>What to look for:</b> slow electrons are captured much more readily than fast ones; captured population first lands in excited levels and then cascades down; a ground + 2p superposition relaxes to the ground state.</li>
+    </ul>
+  </details>
+</main>
+
+<script id="physics">
+// ---------- physics (no DOM; also loaded by check.mjs) ----------
+const HARTREE_EV = 27.211386;
+const AU_TIME_FS = 0.02418884326;
+const C_AU = 137.035999; // speed of light in atomic units
+
+function makeFFT(n) {
+  const levels = Math.round(Math.log2(n));
+  if (1 << levels !== n) throw new Error('FFT size must be a power of 2');
+  const rev = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    let r = 0, x = i;
+    for (let b = 0; b < levels; b++) { r = (r << 1) | (x & 1); x >>= 1; }
+    rev[i] = r;
+  }
+  const cs = new Float64Array(n / 2), sn = new Float64Array(n / 2);
+  for (let i = 0; i < n / 2; i++) { cs[i] = Math.cos(2 * Math.PI * i / n); sn[i] = Math.sin(2 * Math.PI * i / n); }
+  // In-place, unnormalised. Forward uses e^{-ikx}.
+  return function fft(re, im, inverse) {
+    for (let i = 0; i < n; i++) {
+      const j = rev[i];
+      if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    const sgn = inverse ? 1 : -1;
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1, step = n / size;
+      for (let i = 0; i < n; i += size) {
+        for (let j = 0, k = 0; j < half; j++, k += step) {
+          const a = i + j, b = a + half;
+          const wr = cs[k], wi = sgn * sn[k];
+          const tr = re[b] * wr - im[b] * wi;
+          const ti = re[b] * wi + im[b] * wr;
+          re[b] = re[a] - tr; im[b] = im[a] - ti;
+          re[a] += tr; im[a] += ti;
+        }
+      }
+    }
+  };
+}
+
+class Sim {
+  constructor(opts = {}) {
+    Object.assign(this, { N: 256, L: 96, soft: 0.5, dt: 0.05, absorb: 22, eta: 1.5, absorbPow: 4, boost: 0 }, opts);
+    const N = this.N, n2 = N * N, L = this.L;
+    const dx = this.dx = L / N;
+    this.rSafe = L / 2 - this.absorb;
+    this.fft = makeFFT(N);
+    this.re = new Float64Array(n2); this.im = new Float64Array(n2);
+    this.sr = new Float64Array(n2); this.si = new Float64Array(n2);
+    this.colRe = new Float64Array(N); this.colIm = new Float64Array(N);
+    this.xs = new Float64Array(N);
+    for (let i = 0; i < N; i++) this.xs[i] = -L / 2 + i * dx;
+    this.r = new Float64Array(n2); this.theta = new Float64Array(n2);
+    this.V = new Float64Array(n2);
+    this.gx = new Float64Array(n2); this.gy = new Float64Array(n2);    // −∇V
+    this.phx = new Float64Array(2 * N); this.phy = new Float64Array(2 * N);
+    this.vmRe = new Float64Array(n2); this.vmIm = new Float64Array(n2); // half potential step × absorber
+    this.vhRe = new Float64Array(n2); this.vhIm = new Float64Array(n2); // half potential step
+    this.kRe = new Float64Array(n2); this.kIm = new Float64Array(n2);   // kinetic step / N²
+    this.k2h = new Float64Array(n2);                                     // k²/2
+    const ks = this.ks = new Float64Array(N);
+    for (let i = 0; i < N; i++) ks[i] = 2 * Math.PI / L * (i < N / 2 ? i : i - N);
+    const dt = this.dt;
+    for (let j = 0; j < N; j++) {
+      const y = this.xs[j];
+      for (let i = 0; i < N; i++) {
+        const x = this.xs[i], idx = j * N + i;
+        const r = Math.hypot(x, y);
+        this.r[idx] = r; this.theta[idx] = Math.atan2(y, x);
+        const V = -1 / Math.sqrt(r * r + this.soft * this.soft);
+        this.V[idx] = V;
+        const g = -1 / Math.pow(r * r + this.soft * this.soft, 1.5);
+        this.gx[idx] = g * x; this.gy[idx] = g * y;
+        const edge = Math.min(L / 2 - Math.abs(x), L / 2 - Math.abs(y));
+        const s = edge < this.absorb ? 1 - edge / this.absorb : 0;
+        const mask = Math.exp(-this.eta * s ** this.absorbPow * dt);
+        this.vhRe[idx] = Math.cos(-V * dt / 2); this.vhIm[idx] = Math.sin(-V * dt / 2);
+        this.vmRe[idx] = this.vhRe[idx] * mask; this.vmIm[idx] = this.vhIm[idx] * mask;
+        const k2 = ks[i] * ks[i] + ks[j] * ks[j];
+        this.k2h[idx] = k2 / 2;
+        this.kRe[idx] = Math.cos(-k2 / 2 * dt) / n2; this.kIm[idx] = Math.sin(-k2 / 2 * dt) / n2;
+      }
+    }
+    this.t = 0;
+    this.resetRadiation();
+  }
+
+  fft2(re, im, inverse) {
+    const N = this.N, fft = this.fft, cr = this.colRe, ci = this.colIm;
+    for (let j = 0; j < N; j++) fft(re.subarray(j * N, j * N + N), im.subarray(j * N, j * N + N), inverse);
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) { cr[j] = re[j * N + i]; ci[j] = im[j * N + i]; }
+      fft(cr, ci, inverse);
+      for (let j = 0; j < N; j++) { re[j * N + i] = cr[j]; im[j * N + i] = ci[j]; }
+    }
+  }
+
+  static mul(re, im, mr, mi) {
+    for (let i = 0; i < re.length; i++) {
+      const a = re[i], b = im[i];
+      re[i] = a * mr[i] - b * mi[i];
+      im[i] = a * mi[i] + b * mr[i];
+    }
+  }
+
+  step(n = 1) {
+    const { re, im } = this;
+    for (let s = 0; s < n; s++) {
+      Sim.mul(re, im, this.vhRe, this.vhIm);
+      this.fft2(re, im, false);
+      if (this.boost > 0) this.momentum();
+      Sim.mul(re, im, this.kRe, this.kIm);
+      this.fft2(re, im, true);
+      Sim.mul(re, im, this.vmRe, this.vmIm);
+      if (this.boost > 0) this.radiationReaction();
+      this.t += this.dt;
+    }
+  }
+
+  // ⟨p⟩ (not divided by the norm), from ψ in Fourier space (unnormalised FFT)
+  momentum() {
+    const { re, im, ks } = this, N = this.N, f = this.dx * this.dx / (N * N);
+    let px = 0, py = 0;
+    for (let j = 0; j < N; j++) {
+      for (let i = 0, idx = j * N; i < N; i++, idx++) {
+        const w = re[idx] * re[idx] + im[idx] * im[idx];
+        px += w * ks[i]; py += w * ks[j];
+      }
+    }
+    this.pMean = [px * f, py * f];
+  }
+
+  // ⟨−∇V⟩ (= ⟨a⟩, Coulomb acceleration), not divided by the norm
+  dipole() {
+    const { re, im, gx, gy } = this, dA = this.dx * this.dx;
+    let ax = 0, ay = 0;
+    for (let i = 0; i < re.length; i++) {
+      const p = re[i] * re[i] + im[i] * im[i];
+      ax += p * gx[i]; ay += p * gy[i];
+    }
+    return { ax: ax * dA, ay: ay * dA };
+  }
+
+  // Semiclassical radiation reaction (Abraham–Lorentz in Landau–Lifshitz form, mean field):
+  //   F = τ d⟨a⟩/dt,  τ = boost · 2/(3c³),  radiated power P = τ |⟨a⟩|².
+  // F is uniform in space, i.e. an extra potential −F·r, applied for one full step.
+  radiationReaction() {
+    const dt = this.dt, tau = this.boost * 2 / (3 * C_AU ** 3);
+    const d = this.dipole();
+    const prev = this.rrPrev;
+    let Fx = 0, Fy = 0;
+    if (prev) {
+      Fx = tau * (d.ax - prev.ax) / dt; Fy = tau * (d.ay - prev.ay) / dt;
+      this.rrWork += (prev.Fx * this.pMean[0] + prev.Fy * this.pMean[1]) * dt; // power F·⟨v⟩
+    }
+    this.Erad += tau * (d.ax * d.ax + d.ay * d.ay) * dt;
+    this.rrPrev = { ...d, Fx, Fy };
+    this.Frr = [Fx, Fy];
+    if (Fx === 0 && Fy === 0) return;
+    const N = this.N, xs = this.xs, px = this.phx, py = this.phy, { re, im } = this;
+    for (let i = 0; i < N; i++) {
+      px[2 * i] = Math.cos(Fx * xs[i] * dt); px[2 * i + 1] = Math.sin(Fx * xs[i] * dt);
+      py[2 * i] = Math.cos(Fy * xs[i] * dt); py[2 * i + 1] = Math.sin(Fy * xs[i] * dt);
+    }
+    for (let j = 0; j < N; j++) {
+      const cy = py[2 * j], sy = py[2 * j + 1];
+      for (let i = 0, idx = j * N; i < N; i++, idx++) {
+        const c = px[2 * i] * cy - px[2 * i + 1] * sy, s = px[2 * i] * sy + px[2 * i + 1] * cy;
+        const a = re[idx], b = im[idx];
+        re[idx] = a * c - b * s; im[idx] = a * s + b * c;
+      }
+    }
+  }
+
+  resetRadiation() { this.rrPrev = null; this.Erad = 0; this.rrWork = 0; this.Frr = [0, 0]; }
+
+  // ∫|ψ|², ⟨T⟩, ⟨V⟩ (not divided by the norm)
+  measure() {
+    const { re, im, sr, si, V, k2h } = this, n2 = re.length, dA = this.dx * this.dx;
+    let norm = 0, ev = 0;
+    for (let i = 0; i < n2; i++) { const p = re[i] * re[i] + im[i] * im[i]; norm += p; ev += p * V[i]; }
+    sr.set(re); si.set(im);
+    this.fft2(sr, si, false);
+    let et = 0;
+    for (let i = 0; i < n2; i++) et += (sr[i] * sr[i] + si[i] * si[i]) * k2h[i];
+    et *= dA / n2;
+    return { norm: norm * dA, T: et, V: ev * dA, E: et + ev * dA };
+  }
+
+  normalize() {
+    const { re, im } = this, dA = this.dx * this.dx;
+    let s = 0;
+    for (let i = 0; i < re.length; i++) s += re[i] * re[i] + im[i] * im[i];
+    const f = 1 / Math.sqrt(s * dA);
+    for (let i = 0; i < re.length; i++) { re[i] *= f; im[i] *= f; }
+  }
+
+  setPacket({ x0, y0, kx, ky, sigma }) {
+    const N = this.N;
+    for (let j = 0; j < N; j++) {
+      const y = this.xs[j];
+      for (let i = 0; i < N; i++) {
+        const x = this.xs[i], idx = j * N + i;
+        const a = Math.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (4 * sigma * sigma));
+        const ph = kx * x + ky * y;
+        this.re[idx] = a * Math.cos(ph); this.im[idx] = a * Math.sin(ph);
+      }
+    }
+    this.normalize();
+    this.t = 0;
+    this.resetRadiation();
+  }
+
+  // Sum of eigenstates: terms = [{level, m (signed), c: [re, im]}]
+  setSuperposition(terms) {
+    this.re.fill(0); this.im.fill(0);
+    for (const { level, m, c } of terms) {
+      const g = level.grid, th = this.theta;
+      for (let i = 0; i < g.length; i++) {
+        const a = g[i] * Math.cos(m * th[i]), b = g[i] * Math.sin(m * th[i]);
+        this.re[i] += c[0] * a - c[1] * b;
+        this.im[i] += c[0] * b + c[1] * a;
+      }
+    }
+    this.normalize();
+    this.t = 0;
+    this.resetRadiation();
+  }
+}
+
+// Radial equation for ψ = R(r) e^{imθ} in 2D:
+//   −½ (1/r) d/dr(r dR/dr) + m²/(2r²) R + V R = E R
+// Finite volume on r_j = (j+½)h, symmetrised with u = √r R → symmetric tridiagonal matrix.
+function radialLevels(m, soft, { h = 0.02, rMax = 90, nMax = 8, rSafe = Infinity } = {}) {
+  const M = Math.round(rMax / h);
+  const d = new Float64Array(M), e = new Float64Array(M - 1), r = new Float64Array(M);
+  for (let j = 0; j < M; j++) {
+    r[j] = (j + 0.5) * h;
+    d[j] = 1 / (h * h) + m * m / (2 * r[j] * r[j]) - 1 / Math.sqrt(r[j] * r[j] + soft * soft);
+  }
+  for (let j = 0; j < M - 1; j++) e[j] = -0.5 * (j + 1) / (h * h * Math.sqrt((j + 0.5) * (j + 1.5)));
+
+  const countBelow = (x) => {
+    let q = d[0] - x, c = q < 0 ? 1 : 0;
+    for (let j = 1; j < M; j++) {
+      if (q === 0) q = 1e-300;
+      q = d[j] - x - e[j - 1] * e[j - 1] / q;
+      if (q < 0) c++;
+    }
+    return c;
+  };
+  let lower = Infinity;
+  for (let j = 0; j < M; j++) lower = Math.min(lower, d[j] - (j > 0 ? Math.abs(e[j - 1]) : 0) - (j < M - 1 ? Math.abs(e[j]) : 0));
+  const nBound = Math.min(countBelow(0), nMax);
+
+  const levels = [];
+  for (let k = 0; k < nBound; k++) {
+    let lo = lower, hi = 0;
+    for (let it = 0; it < 200 && hi - lo > 1e-14; it++) {
+      const mid = 0.5 * (lo + hi);
+      if (countBelow(mid) > k) hi = mid; else lo = mid;
+    }
+    const E = 0.5 * (lo + hi);
+    // inverse iteration (Thomas algorithm)
+    let u = new Float64Array(M).fill(1);
+    const cp = new Float64Array(M), dp = new Float64Array(M);
+    const shift = E + 1e-11;
+    for (let it = 0; it < 4; it++) {
+      let b0 = d[0] - shift;
+      cp[0] = (M > 1 ? e[0] : 0) / b0; dp[0] = u[0] / b0;
+      for (let j = 1; j < M; j++) {
+        const den = d[j] - shift - e[j - 1] * cp[j - 1];
+        cp[j] = j < M - 1 ? e[j] / den : 0;
+        dp[j] = (u[j] - e[j - 1] * dp[j - 1]) / den;
+      }
+      const y = new Float64Array(M);
+      y[M - 1] = dp[M - 1];
+      for (let j = M - 2; j >= 0; j--) y[j] = dp[j] - cp[j] * y[j + 1];
+      let s = 0;
+      for (let j = 0; j < M; j++) s += y[j] * y[j];
+      s = Math.sqrt(s * h);
+      for (let j = 0; j < M; j++) y[j] /= s;
+      u = y;
+    }
+    let inside = 0;
+    for (let j = 0; j < M && r[j] < rSafe; j++) inside += u[j] * u[j] * h;
+    const R = new Float64Array(M);
+    for (let j = 0; j < M; j++) R[j] = u[j] / Math.sqrt(r[j]);
+    levels.push({ m, nr: k, n: k + m + 1, E, R, h, inside });
+  }
+  return levels;
+}
+
+class Basis {
+  constructor(sim, { mMax = 7, nMax = 8, minInside = 0.99 } = {}) {
+    this.sim = sim;
+    const n2 = sim.N * sim.N, dA = sim.dx * sim.dx;
+    this.levels = [];
+    for (let m = 0; m <= mMax; m++) {
+      for (const lv of radialLevels(m, sim.soft, { nMax, rSafe: sim.rSafe })) {
+        if (lv.inside < minInside) continue;
+        const g = new Float32Array(n2);
+        let s = 0;
+        for (let i = 0; i < n2; i++) {
+          const x = sim.r[i] / lv.h - 0.5;
+          let v;
+          if (x <= 0) v = lv.R[0];
+          else {
+            const j = Math.floor(x), f = x - j;
+            v = j + 1 < lv.R.length ? lv.R[j] * (1 - f) + lv.R[j + 1] * f : 0;
+          }
+          g[i] = v; s += v * v;
+        }
+        const f = 1 / Math.sqrt(s * dA);
+        for (let i = 0; i < n2; i++) g[i] *= f;
+        lv.grid = g;
+        delete lv.R;
+        this.levels.push(lv);
+      }
+    }
+    this.levels.sort((a, b) => a.E - b.E);
+    this.trig = [];
+    for (let m = 1; m <= mMax; m++) {
+      const c = new Float32Array(n2), s = new Float32Array(n2);
+      for (let i = 0; i < n2; i++) { c[i] = Math.cos(m * sim.theta[i]); s[i] = Math.sin(m * sim.theta[i]); }
+      this.trig[m] = { c, s };
+    }
+  }
+
+  // Population of each level (summed over ±m). Returns { pops, total }.
+  project(re, im) {
+    const dA = this.sim.dx * this.sim.dx, n2 = re.length;
+    const pops = new Float64Array(this.levels.length);
+    let total = 0;
+    this.levels.forEach((lv, k) => {
+      const g = lv.grid;
+      let p;
+      if (lv.m === 0) {
+        let ar = 0, ai = 0;
+        for (let i = 0; i < n2; i++) { ar += g[i] * re[i]; ai += g[i] * im[i]; }
+        p = (ar * ar + ai * ai) * dA * dA;
+      } else {
+        const { c, s } = this.trig[lv.m];
+        let ar = 0, ai = 0, br = 0, bi = 0;
+        for (let i = 0; i < n2; i++) {
+          const gc = g[i] * c[i], gs = g[i] * s[i];
+          ar += gc * re[i]; ai += gc * im[i];
+          br += gs * re[i]; bi += gs * im[i];
+        }
+        p = 2 * (ar * ar + ai * ai + br * br + bi * bi) * dA * dA;
+      }
+      pops[k] = p; total += p;
+    });
+    return { pops, total };
+  }
+}
+// ---------- end physics ----------
+</script>
+
+<script>
+// ---------- UI ----------
+const sim = new Sim();
+const basis = new Basis(sim);
+const N = sim.N, L = sim.L;
+
+const $ = (id) => document.getElementById(id);
+const psiCanvas = $('psi'), overlay = $('overlay');
+// show the inner region plus part of the absorber
+const CROP = Math.round((sim.absorb - 8) / sim.dx), VIEWPX = N - 2 * CROP;
+const V0 = -L / 2 + (CROP - 0.5) * sim.dx, VS = VIEWPX * sim.dx; // view origin and size in a₀
+psiCanvas.width = psiCanvas.height = VIEWPX;
+const pctx = psiCanvas.getContext('2d');
+const img = pctx.createImageData(N, N);
+const octx = overlay.getContext('2d');
+
+const levelOf = (n, m) => basis.levels.find((l) => l.n === n && l.m === m);
+const PRESETS = [
+  { name: 'Fly-by (b = 4 a₀)', packet: { x0: -18, y0: 4, kx: 1, ky: 0, sigma: 2.5 } },
+  { name: 'Head-on', packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
+  { name: 'Slow fly-by', packet: { x0: -16, y0: 3, kx: 0.4, ky: 0, sigma: 3 } },
+  { name: 'Released at rest near proton', packet: { x0: -3, y0: 0, kx: 0, ky: 0, sigma: 1.5 } },
+  { name: 'Ground state (stationary)', terms: () => [{ level: levelOf(1, 0), m: 0, c: [1, 0] }] },
+  { name: 'Ground + (n=2, m=+1) superposition', terms: () => [
+      { level: levelOf(1, 0), m: 0, c: [1, 0] }, { level: levelOf(2, 1), m: 1, c: [1, 0] }] },
+  { name: 'Radiating: slow fly-by (boost 10⁸)', boost: 8, packet: { x0: -16, y0: 3, kx: 0.4, ky: 0, sigma: 3 } },
+  { name: 'Radiating: head-on (boost 10⁸)', boost: 8, packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
+  { name: 'Radiating: ground + 2p cascade (boost 10⁶)', boost: 6, terms: () => [
+      { level: levelOf(1, 0), m: 0, c: [1, 0] }, { level: levelOf(2, 1), m: 1, c: [1, 0] }] },
+];
+
+let current = { ...PRESETS[0] };
+let playing = false;
+let stepsPerFrame = 4;
+let mode = 'amp', phaseColor = true;
+let hist = [], E0 = 0, last = null, frameNo = 0;
+let drag = null;
+
+const presetSel = $('preset');
+PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, i)));
+presetSel.add(new Option('Custom (drag)', 'custom'));
+$('sigma').value = 2.5; $('speed').value = stepsPerFrame;
+$('softVal').textContent = sim.soft + ' a₀';
+document.querySelectorAll('.absVal').forEach((e) => (e.textContent = sim.absorb));
+$('boost').value = 6;
+$('gridVal').textContent = `${N}×${N}, box ${L}×${L} a₀ (Δx = ${sim.dx.toFixed(3)} a₀), Δt = ${sim.dt} a.u., absorber ${sim.absorb} a₀`;
+
+function syncLabels() {
+  $('sigmaVal').textContent = (+$('sigma').value).toFixed(1) + ' a₀';
+  $('speedVal').textContent = stepsPerFrame + ' steps/frame';
+  const b = 10 ** +$('boost').value, tau = b * 2 / (3 * C_AU ** 3);
+  $('boostVal').textContent = `10^${(+$('boost').value).toFixed(1).replace('.0', '')} (τ = ${tau < 1 ? tau.toFixed(2) : tau.toFixed(0)} a.u.)`;
+  $('boost').disabled = !$('rrOn').checked;
+  sim.boost = $('rrOn').checked ? b : 0;
+  $('rrWarn').textContent = sim.boost && tau > 0.5
+    ? 'τ is not small compared to orbital times (~1–10 a.u.): the Landau–Lifshitz form is outside its validity, the sink is only qualitative here.' : '';
+}
+
+function reset() {
+  if (current.terms) sim.setSuperposition(current.terms());
+  else sim.setPacket(current.packet);
+  hist = [];
+  const m = sim.measure();
+  E0 = m.E / m.norm;
+  sample(m);
+}
+
+function sample(m = sim.measure()) {
+  const pr = basis.project(sim.re, sim.im);
+  last = { t: sim.t, norm: m.norm, E: m.E, bound: pr.total, pops: pr.pops };
+  hist.push({ t: sim.t, norm: m.norm, bound: pr.total });
+  updateReadouts();
+  drawChart();
+}
+
+const fmtE = (e) => `${e.toFixed(4)} Ha (${(e * HARTREE_EV).toFixed(2)} eV)`;
+function updateReadouts() {
+  $('rT').textContent = `${sim.t.toFixed(1)} a.u. (${(sim.t * AU_TIME_FS).toFixed(3)} fs)`;
+  $('rNorm').textContent = last.norm.toFixed(5);
+  $('rBound').textContent = last.bound.toFixed(5);
+  $('rE').textContent = fmtE(last.E);
+  $('rE0').textContent = fmtE(E0) + ' per unit norm';
+  $('rRad').textContent = sim.boost ? fmtE(sim.Erad) : 'off';
+  $('rWork').textContent = sim.boost ? fmtE(sim.rrWork) : 'off';
+  const rows = basis.levels.slice(0, 14).map((lv, k) => {
+    const p = last.pops[k];
+    return `<tr><td>n=${lv.n}, |m|=${lv.m}</td><td class="num">${(lv.E * HARTREE_EV).toFixed(2)} eV</td>` +
+      `<td class="bar"><div class="b" style="width:${Math.min(100, p * 100).toFixed(2)}%"></div></td>` +
+      `<td class="num">${p.toFixed(4)}</td></tr>`;
+  });
+  $('pops').innerHTML = rows.join('');
+}
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function drawChart() {
+  const c = $('chart'), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const pad = { l: 28, r: 6, t: 6, b: 18 };
+  const tMax = Math.max(10, hist.length ? hist[hist.length - 1].t : 0);
+  const X = (t) => pad.l + (w - pad.l - pad.r) * t / tMax;
+  const Y = (v) => pad.t + (h - pad.t - pad.b) * (1 - v);
+  ctx.strokeStyle = cssVar('--line'); ctx.fillStyle = cssVar('--muted');
+  ctx.font = '10px system-ui'; ctx.lineWidth = 1;
+  for (const v of [0, 0.5, 1]) {
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(w - pad.r, Y(v)); ctx.stroke();
+    ctx.fillText(v.toFixed(1), 4, Y(v) + 3);
+  }
+  ctx.fillText(`t = ${tMax.toFixed(0)} a.u.`, w - pad.r - 64, h - 4);
+  for (const [key, col] of [['norm', '--c-norm'], ['bound', '--c-bound']]) {
+    ctx.strokeStyle = cssVar(col); ctx.lineWidth = 1.5; ctx.beginPath();
+    hist.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p[key])) : ctx.moveTo(X(p.t), Y(p[key]))));
+    ctx.stroke();
+  }
+}
+
+function render() {
+  const { re, im } = sim, d = img.data;
+  let max = 0;
+  for (let i = 0; i < re.length; i++) { const p = re[i] * re[i] + im[i] * im[i]; if (p > max) max = p; }
+  const inv = max > 0 ? 1 / max : 0, decades = 5;
+  for (let j = 0; j < N; j++) {
+    const row = (N - 1 - j) * N; // y up
+    for (let i = 0; i < N; i++) {
+      const idx = j * N + i, a = re[idx], b = im[idx];
+      const p = (a * a + b * b) * inv;
+      let v = mode === 'amp' ? Math.sqrt(p) : Math.max(0, Math.log10(p + 1e-300) / decades + 1);
+      let R = v, G = v, B = v;
+      if (phaseColor) {
+        const amp = Math.sqrt(a * a + b * b) || 1, c = a / amp, s = b / amp;
+        R = v * (0.5 + 0.5 * c);
+        G = v * (0.5 - 0.25 * c + 0.433 * s);
+        B = v * (0.5 - 0.25 * c - 0.433 * s);
+      }
+      const o = (row + i) * 4;
+      d[o] = R * 255; d[o + 1] = G * 255; d[o + 2] = B * 255; d[o + 3] = 255;
+    }
+  }
+  pctx.putImageData(img, -CROP, -CROP, CROP, CROP, VIEWPX, VIEWPX);
+  drawOverlay();
+}
+
+function toPx(x, y, S) { return [(x - V0) / VS * S, (V0 + VS - y) / VS * S]; }
+function toAu(px, py, S) { return [V0 + px / S * VS, V0 + VS - py / S * VS]; }
+
+function drawOverlay() {
+  const dpr = window.devicePixelRatio || 1, S = overlay.clientWidth;
+  if (overlay.width !== Math.round(S * dpr)) { overlay.width = overlay.height = Math.round(S * dpr); }
+  const ctx = octx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, S, S);
+  const [ix, iy] = toPx(-(L / 2 - sim.absorb), L / 2 - sim.absorb, S), iw = (L - 2 * sim.absorb) / VS * S;
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  ctx.fillRect(0, 0, S, iy); ctx.fillRect(0, iy + iw, S, S - iy - iw);
+  ctx.fillRect(0, iy, ix, iw); ctx.fillRect(ix + iw, iy, S - ix - iw, iw);
+  const [cx, cy] = toPx(0, 0, S);
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(cx, cy, sim.rSafe / VS * S, 0, 2 * Math.PI); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ff5a4f';
+  ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, 2 * Math.PI); ctx.fill();
+
+  let arrow = null;
+  if (drag) arrow = drag;
+  else if (sim.t === 0 && current.packet && (current.packet.kx || current.packet.ky)) {
+    const p = current.packet;
+    arrow = { x0: p.x0, y0: p.y0, x1: p.x0 + p.kx * K_SCALE, y1: p.y0 + p.ky * K_SCALE };
+  }
+  if (arrow) {
+    const [ax, ay] = toPx(arrow.x0, arrow.y0, S), [bx, by] = toPx(arrow.x1, arrow.y1, S);
+    ctx.strokeStyle = '#fff'; ctx.fillStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    const ang = Math.atan2(by - ay, bx - ax);
+    if (Math.hypot(bx - ax, by - ay) > 4) {
+      ctx.beginPath(); ctx.moveTo(bx, by);
+      ctx.lineTo(bx - 8 * Math.cos(ang - 0.4), by - 8 * Math.sin(ang - 0.4));
+      ctx.lineTo(bx - 8 * Math.cos(ang + 0.4), by - 8 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fill();
+    }
+    if (drag) {
+      const k = dragK();
+      ctx.font = '12px system-ui';
+      ctx.fillText(`k = ${Math.hypot(k.kx, k.ky).toFixed(2)} a.u., E_kin ≈ ${((k.kx ** 2 + k.ky ** 2) / 2 * HARTREE_EV).toFixed(1)} eV`, 8, S - 10);
+    }
+  }
+}
+
+// momentum: 1 a.u. of k per K_SCALE a₀ of drag
+const K_SCALE = 8, K_MAX = 3;
+function dragK() {
+  let kx = (drag.x1 - drag.x0) / K_SCALE, ky = (drag.y1 - drag.y0) / K_SCALE;
+  const k = Math.hypot(kx, ky);
+  if (k > K_MAX) { kx *= K_MAX / k; ky *= K_MAX / k; }
+  return { kx, ky };
+}
+function eventAu(e) {
+  const rect = overlay.getBoundingClientRect();
+  return toAu(e.clientX - rect.left, e.clientY - rect.top, rect.width);
+}
+overlay.addEventListener('pointerdown', (e) => {
+  overlay.setPointerCapture(e.pointerId);
+  const [x, y] = eventAu(e);
+  drag = { x0: x, y0: y, x1: x, y1: y };
+  setPlaying(false);
+  drawOverlay();
+});
+overlay.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  [drag.x1, drag.y1] = eventAu(e);
+  drawOverlay();
+});
+overlay.addEventListener('pointerup', () => {
+  if (!drag) return;
+  const k = dragK();
+  current = { name: 'custom', packet: { x0: drag.x0, y0: drag.y0, ...k, sigma: +$('sigma').value } };
+  presetSel.value = 'custom';
+  drag = null;
+  reset(); render();
+  setPlaying(true);
+});
+
+function setPlaying(p) { playing = p; $('play').textContent = p ? 'Pause' : 'Play'; }
+$('play').onclick = () => setPlaying(!playing);
+$('reset').onclick = () => { setPlaying(false); reset(); render(); };
+presetSel.onchange = () => {
+  if (presetSel.value === 'custom') return;
+  current = { ...PRESETS[+presetSel.value] };
+  if (current.packet) { current.packet = { ...current.packet }; $('sigma').value = current.packet.sigma; }
+  $('rrOn').checked = !!current.boost;
+  if (current.boost) $('boost').value = current.boost;
+  syncLabels(); setPlaying(false); reset(); render();
+};
+$('sigma').oninput = () => {
+  syncLabels();
+  if (current.packet) { current.packet.sigma = +$('sigma').value; setPlaying(false); reset(); render(); }
+};
+$('speed').oninput = () => { stepsPerFrame = +$('speed').value; syncLabels(); };
+$('rrOn').onchange = $('boost').oninput = () => { syncLabels(); updateReadouts(); };
+$('mode').onchange = () => { mode = $('mode').value; render(); };
+$('phase').onchange = () => { phaseColor = $('phase').checked; render(); };
+window.addEventListener('resize', () => { drawChart(); drawOverlay(); });
+
+function loop() {
+  if (playing) {
+    sim.step(stepsPerFrame);
+    if (++frameNo % 3 === 0) sample();
+    else $('rT').textContent = `${sim.t.toFixed(1)} a.u. (${(sim.t * AU_TIME_FS).toFixed(3)} fs)`;
+    render();
+  }
+  requestAnimationFrame(loop);
+}
+
+syncLabels();
+reset();
+render();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
