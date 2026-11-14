@@ -19,7 +19,19 @@
   body { margin: 0; background: var(--bg); color: var(--fg);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1080px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  nav.stages { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 10px; flex-wrap: wrap; }
+  nav.stages a { padding: 6px 12px; color: var(--muted); text-decoration: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; margin-bottom: -1px; }
+  nav.stages a:hover { color: var(--fg); }
+  nav.stages a.active { color: var(--fg); background: var(--bg); border-color: var(--line); font-weight: 600; }
+  body[data-stage="1"] .s2, body[data-stage="3"] .s2, body[data-stage="1"] .s23 { display: none; }
+  .photon { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+  @media (max-width: 700px) { .photon { grid-template-columns: minmax(0, 1fr); } }
+  .photon figure { margin: 0; }
+  .photon figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .photon canvas { width: 100%; height: 150px; display: block; background: #000; border-radius: 6px; }
+  body:not([data-stage="3"]) .s3 { display: none; }
+  button.small { padding: 2px 8px; font-size: 12px; }
   p.sub { margin: 0 0 14px; color: var(--muted); }
   .views { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
   .views.single { grid-template-columns: minmax(0, 620px); }
@@ -62,18 +74,27 @@
 </head>
 <body>
 <main>
-  <h1>Electron near a proton (2D)</h1>
-  <p class="sub">Time-dependent Schrödinger equation, fixed soft-core proton, split-operator FFT. Optional energy sink: semiclassical radiation reaction.</p>
+  <h1>Electron capture by a proton</h1>
+  <nav class="stages">
+    <a href="#stage1" data-stage="1">1 · No energy sink</a>
+    <a href="#stage2" data-stage="2">2 · Radiation reaction</a>
+    <a href="#stage3" data-stage="3">3 · Photon field</a>
+  </nav>
+  <p class="sub" id="stageSub"></p>
 
   <div class="views" id="views">
     <figure>
       <div class="view"><canvas id="psi"></canvas><canvas id="overlay"></canvas></div>
-      <figcaption>Quantum: brightness = |ψ| (or log |ψ|²), colour = phase<span id="ovCap"></span></figcaption>
+      <figcaption>Quantum: brightness = |ψ| (or log |ψ|²), colour = phase<span class="s3">; green: electron left bound after emitting a photon</span><span id="ovCap"></span></figcaption>
     </figure>
     <figure id="classicalFig">
       <div class="view"><canvas id="classical"></canvas></div>
       <figcaption>Classical ensemble sampled from ψ: <span class="dot" style="background:#6ea2ff"></span>bound (E &lt; 0) <span class="dot" style="background:#ffb15c"></span>free</figcaption>
     </figure>
+  </div>
+  <div class="photon s3">
+    <figure><canvas id="spec"></canvas><figcaption>Emitted photon spectrum (photons that have left the atom). Ticks: ⟨E⟩ − Eₙ, the energy of a photon from capture into level n.</figcaption></figure>
+    <figure><canvas id="pkt"></canvas><figcaption>Emitted photon(s) as a wave packet vs distance from the atom (light travels 7.25 nm per a.u.). Left edge shaded: virtual photon cloud, not emitted.</figcaption></figure>
   </div>
   <div class="hint" style="margin:-6px 0 12px">Drag on either field to place the electron and set its momentum (drag direction and length); a click without dragging starts it at rest. Dashed circle: region where bound states are tracked. Shaded: absorbing edge.</div>
 
@@ -96,11 +117,11 @@
         <div class="row">
           <label>brightness <select id="scale"><option value="fixed">fixed (initial peak)</option><option value="auto">auto (current peak)</option></select></label>
         </div>
-        <div class="row">
-          <label><input id="rrOn" type="checkbox"> radiation reaction</label>
-          <label>boost <input id="boost" type="range" min="4" max="8" step="0.5"><span id="boostVal"></span></label>
+        <div class="row s23">
+          <label>radiation boost <input id="boost" type="range" min="4" max="8" step="0.5"><span id="boostVal"></span></label>
         </div>
-        <div class="hint" id="rrWarn"></div>
+        <div class="hint s2" id="rrWarn"></div>
+        <div class="hint s3" id="fsInfo"></div>
       </div>
 
       <div class="panel">
@@ -118,7 +139,7 @@
           <dt>remaining</dt><dd id="cAlive"></dd>
           <dt>bound (E &lt; 0)</dt><dd id="cBound"></dd>
           <dt>⟨E⟩ of remaining</dt><dd id="cE"></dd>
-          <dt>radiated / electron</dt><dd id="cRad"></dd>
+          <dt class="s23">radiated / electron</dt><dd class="s23" id="cRad"></dd>
         </dl>
       </div>
     </div>
@@ -132,8 +153,11 @@
           <dt>P(bound)</dt><dd id="rBound"></dd>
           <dt>⟨H⟩ on grid</dt><dd id="rE"></dd>
           <dt>initial ⟨H⟩</dt><dd id="rE0"></dd>
-          <dt>radiated (Larmor)</dt><dd id="rRad"></dd>
-          <dt>work by reaction force</dt><dd id="rWork"></dd>
+          <dt class="s3">no photon yet, bound</dt><dd class="s3" id="qBound0"></dd>
+          <dt class="s3">photon emitted, electron bound</dt><dd class="s3" id="qEmit"></dd>
+          <dt class="s3">virtual photon cloud</dt><dd class="s3" id="qNear"></dd>
+          <dt class="s2">radiated (Larmor)</dt><dd class="s2" id="rRad"></dd>
+          <dt class="s2">work by reaction force</dt><dd class="s2" id="rWork"></dd>
         </dl>
       </div>
 
@@ -143,6 +167,7 @@
         <div class="legend">
           <span><span class="swatch" style="background:var(--c-norm)"></span>norm</span>
           <span><span class="swatch" style="background:var(--c-bound)"></span>P(bound)</span>
+          <span class="s3"><span class="swatch" style="background:var(--c-energy)"></span>photon emitted</span>
           <span>dashed: classical</span>
         </div>
       </div>
@@ -167,6 +192,11 @@
       <li>Limits of the mean-field picture: a single excited eigenstate has ⟨a⟩ = 0 and never decays (real atoms do, via vacuum fluctuations); only superpositions radiate. The wavefunction stays one coherent object instead of splitting into "captured + photon" and "free" branches.</li>
       <li><b>Classical ensemble:</b> N point electrons in the same potential (velocity Verlet). Initial positions are drawn from |ψ|²; momenta from a Gaussian with the local mean and spread of the Wigner function at that point (mean ∇S, covariance −¼∇∇ ln|ψ|²). This is exact for Gaussian packets and reproduces ⟨p⟩, ⟨p²⟩ and ⟨H⟩ in general, but not interference. Resampling at any time starts a fresh ensemble from the current ψ. Remaining / bound fractions are scaled by the quantum norm at the sampling time, so they compare directly with the quantum curves.</li>
       <li>Classical radiation: each electron loses energy at its own Larmor rate τa² (same τ and boost), taken from its kinetic energy. Not the same force law as the quantum mean field (the Landau–Lifshitz form is unstable for point particles at large τ), but the same energy loss rate. Each classical electron radiates on its own, whereas the quantum mean field only radiates through the average dipole — and a classical bound electron keeps radiating until it sits at the bottom of the well (E = −1/a = −2 Ha), the classical "collapse of the atom". The quantum ground state does not radiate.</li>
+      <li><b>Photon field (stage 3):</b> the electron couples to the free-space photon field: a continuum of frequencies ωⱼ (0–2 Ha, 512 modes) with polarisations x, y, at most one photon. Velocity gauge, dipole approximation: H = H_e + Σ ωⱼ a†a + Σ Gⱼ p_m (a + a†). The couplings Gⱼ² = boost·(4/3)(ωⱼ/c³)Δω/2π reproduce the real 3D spontaneous emission rate Γ = (4/3) ω |⟨f|p|i⟩|²/c³ (Fermi's golden rule), times the boost.</li>
+      <li>After emitting, the electron can only be in a bound level φₛ (n ≤ 3, both signs of m), so the photon part of the state is just amplitudes c(s, ω, polarisation) — the emitted photon really flies off in its mode and is never put back by hand. The coupling step is exactly unitary (it only involves the 18 vectors p_m φₛ). The coupling is ramped on over the first 15 a.u. so the electron dresses adiabatically instead of emitting a switch-on burst.</li>
+      <li>"Emitted" counts only photons that have left the atom (time of flight &gt; 4 a.u.); the rest is the virtual photon cloud that every charge carries. The green density is the exact reduced electron density of the emitted part.</li>
+      <li>Not included: free→free emission (bremsstrahlung), a second photon (so no further cascade after a capture), the A² term.</li>
+      <li>Classical counterpart: each classical electron radiates at its own Larmor rate with the same boost (as in stage 2).</li>
       <li><b>What to look for:</b> slow electrons are captured much more readily than fast ones; captured population first lands in excited levels and then cascades down; a ground + 2p superposition relaxes to the ground state.</li>
     </ul>
   </details>
@@ -176,7 +206,7 @@
 // ---------- physics (no DOM; also loaded by check.mjs) ----------
 const HARTREE_EV = 27.211386;
 const AU_TIME_FS = 0.02418884326;
-const C_AU = 137.035999; // speed of light in atomic units
+var C_AU = 137.035999; // speed of light in atomic units
 
 function makeFFT(n) {
   const levels = Math.round(Math.log2(n));
@@ -282,6 +312,7 @@ class Sim {
     for (let s = 0; s < n; s++) {
       Sim.mul(re, im, this.vhRe, this.vhIm);
       this.fft2(re, im, false);
+      if (this.kHook) this.kHook(re, im); // stage 3: photon coupling acts on ψ̃ (unnormalised FFT)
       if (this.boost > 0) this.momentum();
       Sim.mul(re, im, this.kRe, this.kIm);
       this.fft2(re, im, true);
@@ -639,6 +670,279 @@ class Ensemble {
     return { alive: alive * w, bound: bound * w, Emean: alive ? E / alive : 0, rad: this.n ? rad / this.n : 0 };
   }
 }
+// Real symmetric eigen-decomposition (cyclic Jacobi). Returns { values, vectors } with vectors as columns (row-major n×n).
+function jacobiEigen(Ain, n) {
+  const A = Float64Array.from(Ain), V = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) V[i * n + i] = 1;
+  for (let sweep = 0; sweep < 100; sweep++) {
+    let off = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += A[i * n + j] ** 2;
+    if (off < 1e-26) break;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+      const apq = A[p * n + q];
+      if (Math.abs(apq) < 1e-300) continue;
+      const th = (A[q * n + q] - A[p * n + p]) / (2 * apq);
+      const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), sn = t * c;
+      for (let k = 0; k < n; k++) {
+        const akp = A[k * n + p], akq = A[k * n + q];
+        A[k * n + p] = c * akp - sn * akq; A[k * n + q] = sn * akp + c * akq;
+      }
+      for (let k = 0; k < n; k++) {
+        const apk = A[p * n + k], aqk = A[q * n + k];
+        A[p * n + k] = c * apk - sn * aqk; A[q * n + k] = sn * apk + c * aqk;
+      }
+      for (let k = 0; k < n; k++) {
+        const vkp = V[k * n + p], vkq = V[k * n + q];
+        V[k * n + p] = c * vkp - sn * vkq; V[k * n + q] = sn * vkp + c * vkq;
+      }
+    }
+  }
+  return { values: Array.from({ length: n }, (_, i) => A[i * n + i]), vectors: V };
+}
+
+// Stage 3: free-space photon field (continuum of frequencies ωⱼ, polarisations x, y), at most one photon.
+// After emitting, the electron can only be in a bound level φₛ (s runs over levels and ±m), so the photon sector is
+// a set of amplitudes c[s, m, j] for "electron in φₛ, photon (ωⱼ, polarisation m)" — no extra grids.
+//   H = H_e + Σ ωⱼ a†a + Σ Gⱼ p_m (a + a†)   (velocity gauge, dipole approximation)
+// Gⱼ² = boost · (4/3)(ωⱼ/c³) Δω/2π reproduces the 3D spontaneous emission rate Γ = (4/3) ω |⟨f|p|i⟩|² / c³
+// (Fermi's golden rule), sped up by `boost`.
+// The coupling only involves the 2·nS vectors vₛₘ = p_m φₛ on the electron side and uₛₘ = Σⱼ Gⱼ|s,m,j⟩ on the photon
+// side, so its exponential is computed exactly from the eigen-decomposition of the Gram matrix ⟨vₛₘ|vₛ'ₘ'⟩ (unitary).
+// Photon amplitudes rotate with E_s + ωⱼ in between (Lie splitting).
+// The coupling is ramped on smoothly over tOn (sin²) so that bound states dress adiabatically instead of emitting a
+// switch-on burst of photons.
+// Not included: free→free emission (bremsstrahlung), a second photon (no cascade after capture), A² term.
+class FreeSpace {
+  constructor(sim, basis, { wMax = 2.0, nW = 512 } = {}) {
+    this.sim = sim; this.basis = basis;
+    const N = sim.N, n2 = N * N, ks = sim.ks, dA = sim.dx * sim.dx;
+    this.states = [];
+    for (const lv of basis.levels) {
+      for (const m of lv.m === 0 ? [0] : [lv.m, -lv.m]) {
+        const Fr = new Float64Array(n2), Fi = new Float64Array(n2);
+        for (let q = 0; q < n2; q++) { Fr[q] = lv.grid[q] * Math.cos(m * sim.theta[q]); Fi[q] = lv.grid[q] * Math.sin(m * sim.theta[q]); }
+        sim.fft2(Fr, Fi, false);
+        this.states.push({ lv, m, E: lv.E, Fr, Fi });
+      }
+    }
+    const nS = this.nS = this.states.length, K = 2 * nS;
+    this.nW = nW; this.dw = wMax / nW;
+    this.w = Float64Array.from({ length: nW }, (_, j) => (j + 0.5) * this.dw);
+    this.cr = new Float64Array(K * nW); this.ci = new Float64Array(K * nW);
+    this.rotC = new Float64Array(nS * nW); this.rotS = new Float64Array(nS * nW);
+    const dt = sim.dt;
+    for (let s = 0; s < nS; s++) for (let j = 0; j < nW; j++) {
+      const ph = -(this.states[s].E + this.w[j]) * dt;
+      this.rotC[s * nW + j] = Math.cos(ph); this.rotS[s * nW + j] = Math.sin(ph);
+    }
+    // Gram matrix Γ[a, b] = ⟨v_a|v_b⟩, a = 2s + m, v = p_m φₛ  (complex Hermitian, K×K)
+    const kx = (q) => ks[q % N], ky = (q) => ks[(q / N) | 0];
+    const Gr = new Float64Array(K * K), Gi = new Float64Array(K * K);
+    for (let a = 0; a < K; a++) for (let b = a; b < K; b++) {
+      const A = this.states[a >> 1], B = this.states[b >> 1], ka = a & 1 ? ky : kx, kb = b & 1 ? ky : kx;
+      let re = 0, im = 0;
+      for (let q = 0; q < n2; q++) {
+        const f = ka(q) * kb(q);
+        if (f === 0) continue;
+        re += f * (A.Fr[q] * B.Fr[q] + A.Fi[q] * B.Fi[q]); im += f * (A.Fr[q] * B.Fi[q] - A.Fi[q] * B.Fr[q]);
+      }
+      Gr[a * K + b] = Gr[b * K + a] = re * dA / n2; Gi[a * K + b] = im * dA / n2; Gi[b * K + a] = -im * dA / n2;
+    }
+    // complex Hermitian → real symmetric 2K×2K [[Re, −Im], [Im, Re]]; pick K orthonormal complex eigenvectors
+    const M2 = 2 * K, R = new Float64Array(M2 * M2);
+    for (let a = 0; a < K; a++) for (let b = 0; b < K; b++) {
+      R[a * M2 + b] = Gr[a * K + b]; R[(a + K) * M2 + b + K] = Gr[a * K + b];
+      R[a * M2 + b + K] = -Gi[a * K + b]; R[(a + K) * M2 + b] = Gi[a * K + b];
+    }
+    const { values, vectors } = jacobiEigen(R, M2);
+    const order = values.map((v, i) => [v, i]).sort((x, y) => y[0] - x[0]);
+    this.Qr = []; this.Qi = []; this.lam = [];
+    for (const [v, i] of order) {
+      if (this.lam.length === K) break;
+      let xr = Array.from({ length: K }, (_, a) => vectors[a * M2 + i]), xi = Array.from({ length: K }, (_, a) => vectors[(a + K) * M2 + i]);
+      for (let e = 0; e < this.lam.length; e++) { // complex Gram–Schmidt
+        let pr = 0, pi = 0;
+        for (let a = 0; a < K; a++) { pr += this.Qr[e][a] * xr[a] + this.Qi[e][a] * xi[a]; pi += this.Qr[e][a] * xi[a] - this.Qi[e][a] * xr[a]; }
+        for (let a = 0; a < K; a++) { xr[a] -= pr * this.Qr[e][a] - pi * this.Qi[e][a]; xi[a] -= pr * this.Qi[e][a] + pi * this.Qr[e][a]; }
+      }
+      let nrm = 0; for (let a = 0; a < K; a++) nrm += xr[a] ** 2 + xi[a] ** 2;
+      if (nrm < 0.25) continue;
+      nrm = Math.sqrt(nrm); xr = xr.map((x) => x / nrm); xi = xi.map((x) => x / nrm);
+      this.Qr.push(xr); this.Qi.push(xi); this.lam.push(Math.max(v, 0));
+    }
+    this.o = new Float64Array(2 * K);
+    this.fft = makeFFT(nW);
+    this.tOn = 15;
+    this.setBoost(1e6);
+    this.reset();
+  }
+
+  setBoost(boost) {
+    this.boost = boost;
+    this.G = Float64Array.from(this.w, (w) => Math.sqrt(boost * (4 / 3) * w / C_AU ** 3 * this.dw / (2 * Math.PI)));
+    this.g = Math.sqrt(this.G.reduce((a, b) => a + b * b, 0));
+    this.Ghat = Float64Array.from(this.G, (x) => x / this.g);
+    const dt = this.sim.dt;
+    this.cosT = this.lam.map((l) => Math.cos(this.g * Math.sqrt(l) * dt));
+    this.sinT = this.lam.map((l) => Math.sin(this.g * Math.sqrt(l) * dt));
+  }
+
+  reset() { this.cr.fill(0); this.ci.fill(0); }
+  attach() { this.sim.kHook = (re, im) => this.couple(re, im); }
+  detach() { this.sim.kHook = null; }
+
+  // o[a] = ⟨v_a|ψ₀⟩ = ⟨φₛ|p_m|ψ₀⟩ from ψ̃₀ (unnormalised FFT)
+  overlaps(ar, ai) {
+    const s_ = this.sim, N = s_.N, n2 = N * N, ks = s_.ks, f = s_.dx * s_.dx / n2, o = this.o;
+    this.states.forEach(({ Fr, Fi }, s) => {
+      let xr = 0, xi = 0, yr = 0, yi = 0;
+      for (let j = 0; j < N; j++) {
+        const ky = ks[j];
+        for (let i = 0, q = j * N; i < N; i++, q++) {
+          const pr = Fr[q] * ar[q] + Fi[q] * ai[q], pi = Fr[q] * ai[q] - Fi[q] * ar[q];
+          xr += ks[i] * pr; xi += ks[i] * pi; yr += ky * pr; yi += ky * pi;
+        }
+      }
+      o[4 * s] = xr * f; o[4 * s + 1] = xi * f; o[4 * s + 2] = yr * f; o[4 * s + 3] = yi * f;
+    });
+  }
+
+  couple(ar, ai) {
+    const { nS, nW, cr, ci, rotC, rotS, Ghat, Qr, Qi, lam, o } = this, K = 2 * nS;
+    const t = this.sim.t, ramp = t < this.tOn ? Math.sin(Math.PI * t / (2 * this.tOn)) ** 2 : 1;
+    const cosT = ramp === 1 ? this.cosT : lam.map((l) => Math.cos(ramp * this.g * Math.sqrt(l) * this.sim.dt));
+    const sinT = ramp === 1 ? this.sinT : lam.map((l) => Math.sin(ramp * this.g * Math.sqrt(l) * this.sim.dt));
+    // free rotation of the photon amplitudes
+    for (let a = 0; a < K; a++) {
+      const rb = (a >> 1) * nW, base = a * nW;
+      for (let j = 0; j < nW; j++) {
+        const q = base + j, x = cr[q], y = ci[q], c = rotC[rb + j], d = rotS[rb + j];
+        cr[q] = x * c - y * d; ci[q] = x * d + y * c;
+      }
+    }
+    this.overlaps(ar, ai);
+    // photon-side components Sₐ = Σⱼ Ĝⱼ c[a, j]
+    const Sr = new Float64Array(K), Si = new Float64Array(K);
+    for (let a = 0; a < K; a++) for (let j = 0; j < nW; j++) { Sr[a] += Ghat[j] * cr[a * nW + j]; Si[a] += Ghat[j] * ci[a * nW + j]; }
+    // in eigenmode e: electron coordinate αₑ = λₑ^{-1/2} Qₑ†o, photon coordinate βₑ = Qₑ†S; rotate exactly
+    const dElr = new Float64Array(K), dEli = new Float64Array(K), dPhr = new Float64Array(K), dPhi = new Float64Array(K);
+    for (let e = 0; e < lam.length; e++) {
+      if (lam[e] < 1e-12) continue;
+      let qr = 0, qi = 0, br = 0, bi = 0;
+      for (let a = 0; a < K; a++) {
+        qr += Qr[e][a] * o[2 * a] + Qi[e][a] * o[2 * a + 1]; qi += Qr[e][a] * o[2 * a + 1] - Qi[e][a] * o[2 * a];
+        br += Qr[e][a] * Sr[a] + Qi[e][a] * Si[a]; bi += Qr[e][a] * Si[a] - Qi[e][a] * Sr[a];
+      }
+      const sl = Math.sqrt(lam[e]), alr = qr / sl, ali = qi / sl, C = cosT[e], Sn = sinT[e];
+      // α' = Cα − i S β, β' = Cβ − i S α
+      const nar = C * alr + Sn * bi, nai = C * ali - Sn * br, nbr = C * br + Sn * ali, nbi = C * bi - Sn * alr;
+      const da_r = (nar - alr) / sl, da_i = (nai - ali) / sl, db_r = nbr - br, db_i = nbi - bi;
+      for (let a = 0; a < K; a++) { // back to (s, m): Q (Δα λ^{-1/2}), Q Δβ
+        dElr[a] += Qr[e][a] * da_r - Qi[e][a] * da_i; dEli[a] += Qr[e][a] * da_i + Qi[e][a] * da_r;
+        dPhr[a] += Qr[e][a] * db_r - Qi[e][a] * db_i; dPhi[a] += Qr[e][a] * db_i + Qi[e][a] * db_r;
+      }
+    }
+    for (let a = 0; a < K; a++) for (let j = 0; j < nW; j++) { cr[a * nW + j] += Ghat[j] * dPhr[a]; ci[a * nW + j] += Ghat[j] * dPhi[a]; }
+    // ψ̃₀ += Σₐ dEl[a] · k_m φ̃ₛ
+    const s_ = this.sim, N = s_.N, ks = s_.ks;
+    this.states.forEach(({ Fr, Fi }, s) => {
+      const xr = dElr[2 * s], xi = dEli[2 * s], yr = dElr[2 * s + 1], yi = dEli[2 * s + 1];
+      if (xr === 0 && xi === 0 && yr === 0 && yi === 0) return;
+      for (let j = 0; j < N; j++) {
+        const ky = ks[j];
+        for (let i = 0, q = j * N; i < N; i++, q++) {
+          const tr = ks[i] * xr + ky * yr, ti = ks[i] * xi + ky * yi;
+          ar[q] += tr * Fr[q] - ti * Fi[q]; ai[q] += tr * Fi[q] + ti * Fr[q];
+        }
+      }
+    });
+  }
+
+  // Split photon amplitudes into "far" (time of flight τ > tauCut, i.e. really emitted) and near (virtual cloud),
+  // via the τ representation c(τ) = Σⱼ cⱼ e^{iωⱼτ}. Returns per-state far probability, far spectrum, far density matrix.
+  observe(tauCut = 4) {
+    const { nS, nW, cr, ci, w, dw } = this, K = 2 * nS, dTau = 2 * Math.PI / (nW * dw);
+    const kCut = Math.ceil(tauCut / dTau);
+    const fr = cr.map((x, i) => x), fi = ci.map((x) => x); // far amplitudes (filled below)
+    const tr = new Float64Array(nW), ti = new Float64Array(nW);
+    let all = 0;
+    for (let a = 0; a < K; a++) {
+      const base = a * nW;
+      // c(τ_k) = Σⱼ cⱼ e^{i(j+½)Δω τ_k}: inverse DFT of cⱼ e^{i½Δω τ_k}
+      for (let j = 0; j < nW; j++) { tr[j] = cr[base + j]; ti[j] = ci[base + j]; all += tr[j] ** 2 + ti[j] ** 2; }
+      this.fft(tr, ti, true);
+      for (let k = 0; k < nW; k++) if (k < kCut || k > nW / 2) { tr[k] = 0; ti[k] = 0; } // keep outgoing, far
+      this.fft(tr, ti, false);
+      for (let j = 0; j < nW; j++) { fr[base + j] = tr[j] / nW; fi[base + j] = ti[j] / nW; }
+    }
+    const perState = new Float64Array(nS), spec = new Float64Array(nW), rho = new Float64Array(nS * nS * 2);
+    for (let m = 0; m < 2; m++) for (let j = 0; j < nW; j++) {
+      for (let s = 0; s < nS; s++) {
+        const q = (2 * s + m) * nW + j, p = fr[q] ** 2 + fi[q] ** 2;
+        perState[s] += p; spec[j] += p;
+        for (let t = 0; t < nS; t++) {
+          const u = (2 * t + m) * nW + j;
+          rho[2 * (s * nS + t)] += fr[q] * fr[u] + fi[q] * fi[u];
+          rho[2 * (s * nS + t) + 1] += fr[q] * fi[u] - fi[q] * fr[u];
+        }
+      }
+    }
+    const far = perState.reduce((a, b) => a + b, 0);
+    return { perState, spec, rho, far, near: all - far, all };
+  }
+
+  // Electron density after emission, Σ ρ_{ss'} φₛ*(r) φₛ'(r).
+  density(rho) {
+    const n2 = this.sim.N * this.sim.N, th = this.sim.theta, out = new Float64Array(n2), nS = this.nS;
+    for (let s = 0; s < nS; s++) for (let t = s; t < nS; t++) {
+      const rr = rho[2 * (s * nS + t)], ri = rho[2 * (s * nS + t) + 1];
+      if (Math.abs(rr) + Math.abs(ri) < 1e-10) continue;
+      const A = this.states[s], B = this.states[t], f = s === t ? 1 : 2, dm = B.m - A.m;
+      for (let q = 0; q < n2; q++) {
+        const g = A.lv.grid[q] * B.lv.grid[q];
+        if (g === 0) continue;
+        out[q] += f * g * (rr * Math.cos(dm * th[q]) - ri * Math.sin(dm * th[q]));
+      }
+    }
+    return out;
+  }
+
+  // Photon probability density vs time of flight τ (distance cτ), summed over s, m, on the grid τ_k = k·dτ
+  // (zero-padded FFT, M points, dτ = 2π/(M Δω)). |Σⱼ cⱼ e^{iωⱼτ}|² Δω/2π integrates to the photon probability.
+  packet(M = 4096) {
+    const { nS, nW, cr, ci, dw } = this, f = dw / (2 * Math.PI);
+    if (!this.fftM || this.fftM.n !== M) { this.fftM = makeFFT(M); this.fftM.n = M; }
+    const out = new Float64Array(M / 2), tr = new Float64Array(M), ti = new Float64Array(M);
+    for (let a = 0; a < 2 * nS; a++) {
+      tr.fill(0); ti.fill(0);
+      for (let j = 0; j < nW; j++) { tr[j] = cr[a * nW + j]; ti[j] = ci[a * nW + j]; }
+      this.fftM(tr, ti, true);
+      for (let k = 0; k < M / 2; k++) out[k] += (tr[k] * tr[k] + ti[k] * ti[k]) * f;
+    }
+    return { dens: out, dTau: 2 * Math.PI / (M * dw) };
+  }
+
+  // electron + photon + interaction energy (for checks)
+  energy() {
+    const s_ = this.sim, m = s_.measure(), { nS, nW, cr, ci, G, w } = this;
+    let ep = 0;
+    for (let s = 0; s < nS; s++) for (let mm = 0; mm < 2; mm++) for (let j = 0; j < nW; j++) {
+      const q = (2 * s + mm) * nW + j;
+      ep += (cr[q] ** 2 + ci[q] ** 2) * (this.states[s].E + w[j]);
+    }
+    const ar = Float64Array.from(s_.re), ai = Float64Array.from(s_.im);
+    s_.fft2(ar, ai, false);
+    this.overlaps(ar, ai);
+    let eint = 0;
+    for (let a = 0; a < 2 * nS; a++) {
+      let sr = 0, si = 0;
+      for (let j = 0; j < nW; j++) { sr += G[j] * cr[a * nW + j]; si += G[j] * ci[a * nW + j]; }
+      eint += 2 * (sr * this.o[2 * a] + si * this.o[2 * a + 1]);
+    }
+    let pn = 0; for (let q = 0; q < cr.length; q++) pn += cr[q] ** 2 + ci[q] ** 2;
+    return { electron: m.E, photon: ep, interaction: eint, total: m.E + ep + eint, norm: m.norm, photons: pn };
+  }
+}
 // ---------- end physics ----------
 </script>
 
@@ -659,23 +963,50 @@ const img = pctx.createImageData(N, N);
 const octx = overlay.getContext('2d');
 const ccan = $('classical'), cctx = ccan.getContext('2d');
 const ens = new Ensemble(sim);
+const fs = new FreeSpace(sim, basis);
+let emitDens = null, fsObs = null, fsPacket = null;
 const C_BOUND = '#6ea2ff', C_FREE = '#ffb15c';
 let refMax = 1, autoScale = false, overlayDots = false, trails = false, ensGen = 0, cLast = null;
 
 const levelOf = (n, m) => basis.levels.find((l) => l.n === n && l.m === m);
-const PRESETS = [
-  { name: 'Fly-by (b = 4 a₀)', packet: { x0: -18, y0: 4, kx: 1, ky: 0, sigma: 2.5 } },
-  { name: 'Head-on', packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
-  { name: 'Slow fly-by', packet: { x0: -16, y0: 3, kx: 0.4, ky: 0, sigma: 3 } },
-  { name: 'Released at rest near proton', packet: { x0: -3, y0: 0, kx: 0, ky: 0, sigma: 1.5 } },
-  { name: 'Ground state (stationary)', terms: () => [{ level: levelOf(1, 0), m: 0, c: [1, 0] }] },
-  { name: 'Ground + (n=2, m=+1) superposition', terms: () => [
-      { level: levelOf(1, 0), m: 0, c: [1, 0] }, { level: levelOf(2, 1), m: 1, c: [1, 0] }] },
-  { name: 'Radiating: slow fly-by (boost 10⁸)', boost: 8, packet: { x0: -16, y0: 3, kx: 0.4, ky: 0, sigma: 3 } },
-  { name: 'Radiating: head-on (boost 10⁸)', boost: 8, packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
-  { name: 'Radiating: ground + 2p cascade (boost 10⁶)', boost: 6, terms: () => [
-      { level: levelOf(1, 0), m: 0, c: [1, 0] }, { level: levelOf(2, 1), m: 1, c: [1, 0] }] },
-];
+const ground = () => [{ level: levelOf(1, 0), m: 0, c: [1, 0] }];
+const ground2p = () => [{ level: levelOf(1, 0), m: 0, c: [1, 0] }, { level: levelOf(2, 1), m: 1, c: [1, 0] }];
+const STAGES = {
+  1: {
+    sub: 'Time-dependent Schrödinger equation, fixed soft-core proton, no way to lose energy. Bound-state populations are constants of motion.',
+    presets: [
+      { name: 'Fly-by (b = 4 a₀)', packet: { x0: -18, y0: 4, kx: 1, ky: 0, sigma: 2.5 } },
+      { name: 'Head-on', packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
+      { name: 'Slow fly-by (5 eV)', packet: { x0: -18, y0: 3, kx: 0.7, ky: 0, sigma: 4 } },
+      { name: 'Released at rest near proton', packet: { x0: -3, y0: 0, kx: 0, ky: 0, sigma: 1.5 } },
+      { name: 'Ground state (stationary)', terms: ground },
+      { name: 'Ground + (n=2, m=+1) superposition', terms: ground2p },
+    ],
+  },
+  2: {
+    sub: 'Energy sink: semiclassical radiation reaction (Larmor loss, Landau–Lifshitz recoil force), sped up by a boost factor.',
+    presets: [
+      { name: 'Slow fly-by 5 eV (boost 10⁸)', boost: 8, packet: { x0: -18, y0: 3, kx: 0.7, ky: 0, sigma: 4 } },
+      { name: 'Head-on (boost 10⁸)', boost: 8, packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
+      { name: 'Fly-by, valid regime (boost 10⁶)', boost: 6, packet: { x0: -18, y0: 4, kx: 1, ky: 0, sigma: 2.5 } },
+      { name: 'Ground + 2p cascade (boost 10⁶)', boost: 6, terms: ground2p },
+      { name: 'Ground state: quantum stable, classical collapses (boost 10⁶)', boost: 6, terms: ground },
+    ],
+  },
+};
+const p2only = () => [{ level: levelOf(2, 1), m: 1, c: [1, 0] }];
+STAGES[3] = {
+  sub: 'Electron coupled to the quantised photon field (continuum of modes, at most one photon). Capture happens by emitting a photon, which flies away. Rates are the real ones times the boost.',
+  presets: [
+    { name: '2p: spontaneous emission (boost 10⁶)', boost: 6, terms: p2only },
+    { name: 'Ground + 2p superposition (boost 10⁶)', boost: 6, terms: ground2p },
+    { name: 'Head-on 13 eV: radiative capture (boost 10⁶)', boost: 6, packet: { x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 } },
+    { name: 'Fly-by 5 eV: radiative capture (boost 10⁶)', boost: 6, packet: { x0: -18, y0: 3, kx: 0.7, ky: 0, sigma: 4 } },
+    { name: 'Ground state: stable, only dressed (boost 10⁶)', boost: 6, terms: ground },
+  ],
+};
+let stage = 1;
+let PRESETS = STAGES[1].presets;
 
 let current = { ...PRESETS[0] };
 let playing = false;
@@ -685,12 +1016,11 @@ let hist = [], E0 = 0, last = null, frameNo = 0;
 let drag = null;
 
 const presetSel = $('preset');
-PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, i)));
-presetSel.add(new Option('Custom (drag)', 'custom'));
 $('sigma').value = 2.5; $('speed').value = stepsPerFrame;
 $('softVal').textContent = sim.soft + ' a₀';
 document.querySelectorAll('.absVal').forEach((e) => (e.textContent = sim.absorb));
 $('boost').value = 6;
+const lowestLevel = (n) => basis.levels.filter((l) => l.n === n).sort((a, b) => a.m - b.m)[0];
 $('gridVal').textContent = `${N}×${N}, box ${L}×${L} a₀ (Δx = ${sim.dx.toFixed(3)} a₀), Δt = ${sim.dt} a.u., absorber ${sim.absorb} a₀`;
 
 function syncLabels() {
@@ -698,8 +1028,12 @@ function syncLabels() {
   $('speedVal').textContent = stepsPerFrame + ' steps/frame';
   const b = 10 ** +$('boost').value, tau = b * 2 / (3 * C_AU ** 3);
   $('boostVal').textContent = `10^${(+$('boost').value).toFixed(1).replace('.0', '')} (τ = ${tau < 1 ? tau.toFixed(2) : tau.toFixed(0)} a.u.)`;
-  $('boost').disabled = !$('rrOn').checked;
-  sim.boost = $('rrOn').checked ? b : 0;
+  sim.boost = stage === 2 ? b : 0;
+  if (stage === 3 && fs.boost !== b) fs.setBoost(b);
+  if (stage === 3) {
+    const g = fs.boost * 4 / 3 * (levelOf(2, 1).E - levelOf(1, 0).E) / C_AU ** 3; // Γ/|p|²
+    $('fsInfo').textContent = `Real rates × ${b.toExponential(0)}. For comparison: hydrogen 2p lifetime 1.6 ns ≈ 6.6·10⁷ a.u. → ${(6.6e7 / b).toPrecision(2)} a.u. here.`;
+  }
   $('rrWarn').textContent = sim.boost && tau > 0.5
     ? 'τ is not small compared to orbital times (~1–10 a.u.): the Landau–Lifshitz form is outside its validity, the sink is only qualitative here.' : '';
 }
@@ -707,13 +1041,17 @@ function syncLabels() {
 function reset() {
   if (current.terms) sim.setSuperposition(current.terms());
   else sim.setPacket(current.packet);
-  refMax = 0;
-  for (let i = 0; i < sim.re.length; i++) refMax = Math.max(refMax, sim.re[i] ** 2 + sim.im[i] ** 2);
   hist = [];
   const m = sim.measure();
   E0 = m.E / m.norm;
-  resample(false);
-  sample(m);
+  resample(false); // classical ensemble from the bare electron state
+  if (stage === 3) fs.reset();
+  refMax = 0;
+  for (let i = 0; i < sim.re.length; i++) {
+    let p = sim.re[i] ** 2 + sim.im[i] ** 2;
+    refMax = Math.max(refMax, p);
+  }
+  sample(stage === 3 ? undefined : m);
 }
 
 function resample(record = true) {
@@ -725,13 +1063,24 @@ function resample(record = true) {
   if (record) sample();
 }
 
-const tauNow = () => sim.boost * 2 / (3 * C_AU ** 3);
+const tauNow = () => (stage === 3 ? fs.boost : sim.boost) * 2 / (3 * C_AU ** 3);
 
-function sample(m = sim.measure()) {
-  const pr = basis.project(sim.re, sim.im);
-  last = { t: sim.t, norm: m.norm, E: m.E, bound: pr.total, pops: pr.pops };
+function sample(m) {
+  if (stage === 3) {
+    m = sim.measure();
+    const pr = basis.project(sim.re, sim.im), o = fsObs = fs.observe(), nl = basis.levels.length;
+    const pops = Float64Array.from(pr.pops);
+    fs.states.forEach((st, s) => { pops[nl > 0 ? basis.levels.indexOf(st.lv) : 0] += o.perState[s]; });
+    last = { t: sim.t, norm: m.norm + o.all, E: m.E, bound: pr.total + o.far, pops, bound0: pr.total, emit: o.far, near: o.near };
+    emitDens = fs.density(o.rho);
+    fsPacket = fs.packet();
+  } else {
+    m = m || sim.measure();
+    const pr = basis.project(sim.re, sim.im);
+    last = { t: sim.t, norm: m.norm, E: m.E, bound: pr.total, pops: pr.pops };
+  }
   cLast = ens.n ? ens.stats() : null;
-  hist.push({ t: sim.t, norm: m.norm, bound: pr.total, cNorm: cLast?.alive, cBound: cLast?.bound, gen: ensGen });
+  hist.push({ t: sim.t, norm: last.norm, bound: last.bound, emit: stage === 3 ? last.emit : undefined, cNorm: cLast?.alive, cBound: cLast?.bound, gen: ensGen });
   updateReadouts();
   drawChart();
 }
@@ -744,6 +1093,11 @@ function updateReadouts() {
   $('rE').textContent = fmtE(last.E);
   $('rE0').textContent = fmtE(E0) + ' per unit norm';
   $('rRad').textContent = sim.boost ? fmtE(sim.Erad) : 'off';
+  if (stage === 3) {
+    $('qBound0').textContent = last.bound0.toFixed(5);
+    $('qEmit').textContent = last.emit.toFixed(5);
+    $('qNear').textContent = last.near.toFixed(5);
+  }
   $('rWork').textContent = sim.boost ? fmtE(sim.rrWork) : 'off';
   const rows = basis.levels.slice(0, 14).map((lv, k) => {
     const p = last.pops[k];
@@ -757,7 +1111,7 @@ function updateReadouts() {
     $('cAlive').textContent = cLast.alive.toFixed(4);
     $('cBound').textContent = cLast.bound.toFixed(4);
     $('cE').textContent = fmtE(cLast.Emean);
-    $('cRad').textContent = sim.boost ? fmtE(cLast.rad) : 'off';
+    $('cRad').textContent = stage > 1 ? fmtE(cLast.rad) : 'off';
   }
 }
 
@@ -781,7 +1135,7 @@ function drawChart() {
     ctx.fillText(v.toFixed(1), 4, Y(v) + 3);
   }
   ctx.fillText(`t = ${tMax.toFixed(0)} a.u.`, w - pad.r - 64, h - 4);
-  for (const [key, col, dash] of [['norm', '--c-norm', []], ['bound', '--c-bound', []], ['cNorm', '--c-norm', [4, 3]], ['cBound', '--c-bound', [4, 3]]]) {
+  for (const [key, col, dash] of [['norm', '--c-norm', []], ['bound', '--c-bound', []], ['emit', '--c-energy', []], ['cNorm', '--c-norm', [4, 3]], ['cBound', '--c-bound', [4, 3]]]) {
     ctx.strokeStyle = cssVar(col); ctx.lineWidth = 1.5; ctx.setLineDash(dash); ctx.beginPath();
     let prev = null;
     for (const p of hist) {
@@ -795,24 +1149,29 @@ function drawChart() {
 }
 
 function render() {
-  const { re, im } = sim, d = img.data;
+  const { re, im } = sim, d = img.data, s3 = stage === 3;
+  const ed = s3 ? emitDens : null;
+  const dens = (i) => re[i] * re[i] + im[i] * im[i] + (ed ? ed[i] : 0);
   let max = refMax;
-  if (autoScale) { max = 0; for (let i = 0; i < re.length; i++) { const p = re[i] * re[i] + im[i] * im[i]; if (p > max) max = p; } }
+  if (autoScale) { max = 0; for (let i = 0; i < re.length; i++) { const p = dens(i); if (p > max) max = p; } }
   const inv = max > 0 ? 1 / max : 0, decades = 5;
   for (let j = 0; j < N; j++) {
     const row = (N - 1 - j) * N; // y up
     for (let i = 0; i < N; i++) {
       const idx = j * N + i, a = re[idx], b = im[idx];
-      const p = (a * a + b * b) * inv;
+      const p0 = a * a + b * b, pt = s3 ? dens(idx) : p0, p = pt * inv;
       let v = mode === 'amp' ? Math.sqrt(p) : Math.max(0, Math.log10(p + 1e-300) / decades + 1);
       if (v > 1) v = 1;
-      let R = v, G = v, B = v;
+      let R = 1, G = 1, B = 1;
       if (phaseColor) {
-        const amp = Math.sqrt(a * a + b * b) || 1, c = a / amp, s = b / amp;
-        R = v * (0.5 + 0.5 * c);
-        G = v * (0.5 - 0.25 * c + 0.433 * s);
-        B = v * (0.5 - 0.25 * c - 0.433 * s);
+        const amp = Math.sqrt(p0) || 1, c = a / amp, s = b / amp;
+        R = 0.5 + 0.5 * c; G = 0.5 - 0.25 * c + 0.433 * s; B = 0.5 - 0.25 * c - 0.433 * s;
       }
+      if (ed && pt > 0) { // mix: electron without photon (phase or white), electron left behind after emission green
+        const we = Math.min(1, Math.max(0, ed[idx] / pt)), w0 = 1 - we;
+        R = w0 * R + we * 0.35; G = w0 * G + we * 1.0; B = w0 * B + we * 0.45;
+      }
+      R *= v; G *= v; B *= v;
       const o = (row + i) * 4;
       d[o] = R * 255; d[o + 1] = G * 255; d[o + 2] = B * 255; d[o + 3] = 255;
     }
@@ -820,6 +1179,64 @@ function render() {
   pctx.putImageData(img, -CROP, -CROP, CROP, CROP, VIEWPX, VIEWPX);
   drawOverlay();
   drawClassical();
+  if (s3) drawPhoton();
+}
+
+function drawPhoton() {
+  const dpr = window.devicePixelRatio || 1;
+  // spectrum
+  const sc = $('spec'), sctx = sc.getContext('2d');
+  sizeCanvasWH(sc);
+  let W = sc.clientWidth, H = sc.clientHeight;
+  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sctx.fillStyle = '#000'; sctx.fillRect(0, 0, W, H);
+  const pad = 18, X = (w) => 8 + (W - 16) * w / 2.0, base = H - pad;
+  sctx.fillStyle = 'rgba(255,255,255,0.55)'; sctx.font = '11px system-ui';
+  for (let e = 0; e <= 50; e += 10) { const w = e / HARTREE_EV; sctx.fillRect(X(w), base, 1, 4); sctx.fillText(`${e} eV`, X(w) - 10, H - 3); }
+  for (let n = 1; n <= 3; n++) {
+    const lv = lowestLevel(n); if (!lv) continue;
+    const w = E0 - lv.E; if (w <= 0 || w > 2) continue;
+    sctx.fillStyle = 'rgba(255,255,255,0.35)'; sctx.fillRect(X(w), 4, 1, base - 4);
+    sctx.fillStyle = 'rgba(255,255,255,0.7)'; sctx.fillText(`n=${n}`, X(w) + 3, 14);
+  }
+  if (fsObs) {
+    const sp = fsObs.spec, mx = Math.max(1e-12, ...sp);
+    sctx.strokeStyle = '#7fe08f'; sctx.fillStyle = 'rgba(127,224,143,0.35)'; sctx.beginPath(); sctx.moveTo(X(0), base);
+    for (let j = 0; j < sp.length; j++) sctx.lineTo(X(fs.w[j]), base - (base - 20) * sp[j] / mx);
+    sctx.lineTo(X(2), base); sctx.closePath(); sctx.fill(); sctx.stroke();
+    sctx.fillStyle = 'rgba(255,255,255,0.7)';
+    sctx.fillText(`total emitted ${fsObs.far.toFixed(4)}`, W - 130, 14);
+  }
+  // wave packet vs distance cτ
+  const pc = $('pkt'), pctx2 = pc.getContext('2d');
+  sizeCanvasWH(pc);
+  W = pc.clientWidth; H = pc.clientHeight;
+  pctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pctx2.fillStyle = '#000'; pctx2.fillRect(0, 0, W, H);
+  const tauMax = Math.max(40, Math.ceil(sim.t / 20) * 20);
+  const XP = (tau) => 8 + (W - 16) * tau / tauMax, bp = H - pad;
+  pctx2.fillStyle = 'rgba(255,255,255,0.08)'; pctx2.fillRect(XP(0), 0, XP(4) - XP(0), bp);
+  pctx2.fillStyle = 'rgba(255,255,255,0.55)'; pctx2.font = '11px system-ui';
+  for (let k = 0; k <= 4; k++) {
+    const tau = tauMax * k / 4, nm = tau * C_AU * 0.0529177;
+    pctx2.fillRect(XP(tau), bp, 1, 4);
+    pctx2.fillText(nm >= 1000 ? `${(nm / 1000).toFixed(1)} µm` : `${nm.toFixed(0)} nm`, Math.min(XP(tau) - 8, W - 44), H - 3);
+  }
+  if (fsPacket) {
+    const { dens, dTau } = fsPacket, kMax = Math.min(dens.length - 1, Math.ceil(tauMax / dTau)), k4 = Math.ceil(4 / dTau);
+    let mx = 1e-9; for (let k = k4; k <= kMax; k++) mx = Math.max(mx, dens[k]);
+    pctx2.strokeStyle = '#7fe08f'; pctx2.fillStyle = 'rgba(127,224,143,0.35)'; pctx2.beginPath(); pctx2.moveTo(XP(0), bp);
+    for (let k = 0; k <= kMax; k++) pctx2.lineTo(XP(k * dTau), bp - (bp - 16) * Math.min(1.05, dens[k] / mx));
+    pctx2.lineTo(XP(kMax * dTau), bp); pctx2.closePath(); pctx2.fill(); pctx2.stroke();
+  }
+  pctx2.fillStyle = 'rgba(255,255,255,0.7)';
+  pctx2.fillText('atom', XP(0) + 2, 12);
+  pctx2.fillText(`photon front: c·t = ${(sim.t * C_AU * 0.0529177).toFixed(0)} nm`, W - 190, 12);
+}
+
+function sizeCanvasWH(c) {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (w && (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr))) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
 }
 
 function drawStatic(ctx, S) {
@@ -954,16 +1371,34 @@ presetSel.onchange = () => {
   if (presetSel.value === 'custom') return;
   current = { ...PRESETS[+presetSel.value] };
   if (current.packet) { current.packet = { ...current.packet }; $('sigma').value = current.packet.sigma; }
-  $('rrOn').checked = !!current.boost;
   if (current.boost) $('boost').value = current.boost;
+
   syncLabels(); setPlaying(false); reset(); render();
 };
+
+function setStage(n) {
+  stage = n;
+  document.body.dataset.stage = n;
+  document.querySelectorAll('nav.stages a[data-stage]').forEach((a) => a.classList.toggle('active', +a.dataset.stage === n));
+  $('stageSub').textContent = STAGES[n].sub;
+  PRESETS = STAGES[n].presets;
+  presetSel.length = 0;
+  PRESETS.forEach((p, i) => presetSel.add(new Option(p.name, i)));
+  presetSel.add(new Option('Custom (drag)', 'custom'));
+  stepsPerFrame = 4; $('speed').value = stepsPerFrame;
+  if (n === 3) fs.attach(); else fs.detach();
+  presetSel.value = '0';
+  presetSel.onchange();
+}
+const stageFromHash = () => ({ '#stage2': 2, '#stage3': 3 })[location.hash] || 1;
+window.addEventListener('hashchange', () => setStage(stageFromHash()));
 $('sigma').oninput = () => {
   syncLabels();
   if (current.packet) { current.packet.sigma = +$('sigma').value; setPlaying(false); reset(); render(); }
 };
 $('speed').oninput = () => { stepsPerFrame = +$('speed').value; syncLabels(); };
-$('rrOn').onchange = $('boost').oninput = () => { syncLabels(); updateReadouts(); };
+$('boost').oninput = () => { syncLabels(); updateReadouts(); };
+
 $('mode').onchange = () => { mode = $('mode').value; render(); };
 $('phase').onchange = () => { phaseColor = $('phase').checked; render(); };
 $('scale').onchange = () => { autoScale = $('scale').value === 'auto'; render(); };
@@ -990,9 +1425,7 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-syncLabels();
-reset();
-render();
+setStage(stageFromHash());
 requestAnimationFrame(loop);
 </script>
 </body>

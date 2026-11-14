@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 const code = html.match(/<script id="physics">([\s\S]*?)<\/script>/)[1];
-const { Sim, Basis, Ensemble } = new Function(`${code}; return { Sim, Basis, Ensemble };`)();
+const { Sim, Basis, Ensemble, FreeSpace, C_AU } = new Function(`${code}; return { Sim, Basis, Ensemble, FreeSpace, C_AU };`)();
 
 let failures = 0;
 function expect(label, ok, detail) {
@@ -81,11 +81,11 @@ sim.step(400);
 expect('ground state, boost 1e7: does not radiate', sim.Erad < 1e-8, `radiated ${fmt(sim.Erad)} Ha`);
 
 sim.boost = 1e8;
-sim.setPacket({ x0: -16, y0: 3, kx: 0.4, ky: 0, sigma: 3 });
+sim.setPacket({ x0: -18, y0: 3, kx: 0.7, ky: 0, sigma: 4 });
 const p0 = basis.project(sim.re, sim.im).total;
 sim.step(2400);
 const p1 = basis.project(sim.re, sim.im).total;
-expect('slow fly-by, boost 1e8: capture', p1 > p0 + 0.3, `P(bound) ${p0.toFixed(3)} → ${p1.toFixed(3)}`);
+expect('slow fly-by (5 eV), boost 1e8: capture', p1 > p0 + 0.3, `P(bound) ${p0.toFixed(3)} → ${p1.toFixed(3)}`);
 expect('  energy removed', sim.rrWork < -0.1, `work ${sim.rrWork.toFixed(4)} Ha (radiated ${sim.Erad.toFixed(4)}; τ = 26 a.u., LL balance not expected)`);
 
 // 5. Classical ensemble sampled from ψ.
@@ -118,6 +118,40 @@ ens.step(800, 1e6 * 2 / (3 * 137.035999 ** 3));
 const st = ens.stats();
 expect('classical ground-state ensemble with radiation (boost 1e6) collapses below the quantum ground state',
   st.Emean < lv(1, 0).E - 0.2, `⟨E⟩ = ${st.Emean.toFixed(3)} Ha (quantum ground ${lv(1, 0).E.toFixed(3)}, well bottom −2)`);
+
+// 6. Photon field (stage 3): free-space continuum.
+const fsp = new FreeSpace(sim, basis);
+fsp.setBoost(1e6); fsp.attach();
+const p2pop = () => basis.project(sim.re, sim.im).pops[basis.levels.indexOf(lv(2, 1))];
+sim.setSuperposition([{ level: lv(2, 1), m: 1, c: [1, 0] }]); fsp.reset();
+{
+  const ar = Float64Array.from(sim.re), ai = Float64Array.from(sim.im); sim.fft2(ar, ai, false); fsp.overlaps(ar, ai);
+  const p2 = fsp.o[0] ** 2 + fsp.o[1] ** 2 + fsp.o[2] ** 2 + fsp.o[3] ** 2;
+  const gFGR = 1e6 * 4 / 3 * (lv(2, 1).E - lv(1, 0).E) * p2 / C_AU ** 3;
+  sim.step(600); const a = p2pop(), ea = fsp.energy(); sim.step(600); const b = p2pop(), eb = fsp.energy();
+  const gSim = Math.log(a / b) / 30;
+  expect('photon field: 2p decay rate vs Fermi golden rule (boost 1e6)', Math.abs(gSim / gFGR - 1) < 0.1, `Γ = ${gSim.toFixed(4)} vs ${gFGR.toFixed(4)} /a.u.`);
+  expect('  probability conserved (electron + photons)', Math.abs(eb.norm + eb.photons - 1) < 2e-3, `${(eb.norm + eb.photons).toFixed(5)}`);
+  expect('  energy conserved (electron + photon + interaction)', Math.abs(eb.total - ea.total) < 2e-3, `${ea.total.toFixed(5)} → ${eb.total.toFixed(5)} Ha`);
+  sim.step(2400);
+  const o = fsp.observe();
+  expect('  ends in 1s with the photon emitted', o.perState[0] > 0.9, `P(1s, photon emitted) = ${o.perState[0].toFixed(3)}`);
+}
+sim.setSuperposition([{ level: lv(1, 0), m: 0, c: [1, 0] }]); fsp.reset();
+sim.step(1200);
+{
+  const o = fsp.observe(), e = fsp.energy();
+  expect('photon field: ground state does not emit (only dressed)', o.far < 1e-3 && Math.abs(e.norm + e.photons - 1) < 1e-4,
+    `emitted ${fmt(o.far)}, virtual cloud ${o.near.toFixed(4)}, total probability ${(e.norm + e.photons).toFixed(6)}`);
+}
+sim.setPacket({ x0: -18, y0: 0, kx: 1, ky: 0, sigma: 2.5 }); fsp.reset();
+sim.step(2000);
+{
+  const o = fsp.observe();
+  expect('photon field: head-on 13 eV electron, radiative capture (boost 1e6)', o.far > 0.02 && o.perState[0] > 0.5 * o.far,
+    `captured with photon emitted ${o.far.toFixed(4)}, of which 1s ${o.perState[0].toFixed(4)}`);
+}
+fsp.detach();
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
 process.exit(failures ? 1 : 0);
